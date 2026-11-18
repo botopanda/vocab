@@ -85,9 +85,9 @@ async function boot() {
   } catch (e) {
     if (/没有权限/.test(e.message)) {
       try { const d = await rpc('adm_load'); document.title = '单词系统 · 管理'; Adm.start(d); }
-      catch (e2) { app.innerHTML = '<div class="wrap boot">' + esc(e2.message) + '</div>'; }
+      catch (e2) { app.innerHTML = '<div class="wrap boot">' + esc(e2.message) + '<p><button class="btn" onclick="location.reload()">重新打开</button></p></div>'; }
     } else {
-      app.innerHTML = '<div class="wrap boot">' + esc(e.message) + '</div>';
+      app.innerHTML = '<div class="wrap boot">' + esc(e.message) + (/链接无效/.test(e.message) ? '' : '<p><button class="btn" onclick="location.reload()">重新打开</button></p>') + '</div>';
     }
   }
 }
