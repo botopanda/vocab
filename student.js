@@ -53,8 +53,8 @@ const Stu = (() => {
       (D.errbook.length ? '<div class="box"><h2>先看看错过的词</h2><div class="muted">一共 ' + D.errbook.length + ' 个，在「错词本」里。</div><div><button class="gbtn" data-tab="err">打开错词本</button></div></div>' : '');
     if (!cards().length) return '<div class="box"><h2>这周没有新词</h2><div class="muted">可能是这个范围的词已经全部学完了，或者老师给你暂停了一周。</div></div>';
     if (!queue.length) {
-      const tested = D.test && D.test.done;
-      const canMore = D.cfg.addOn && !D.test;
+      const tested = (D.tests || []).some(x => x.done && (x.parts || []).includes('week'));
+      const canMore = D.cfg.addOn && !(D.tests || []).some(x => x.started && (x.parts || []).includes('week'));
       return '<div class="card"><h2>' + (mode === 'all' ? '这一遍过完了' : '本周的 ' + cards().length + ' 个词都学过了') + '</h2>' +
         '<div class="muted">' + (tested ? '周测已经考完了。' : '学完记得去做周测：本周的词全部都考，及格线 ' + D.cfg.pass + '%。') + '</div>' +
         '<div class="form">' +
@@ -90,31 +90,40 @@ const Stu = (() => {
   }
 
   // ── 测验 ──
+  const KN = { week: '周测', review: '回顾测', quarter: '季度测', year: '年测' };
+  const tName = x => (x.parts && x.parts.length > 1) ? x.parts.map(p => KN[p]).join('＋') + '（合成一场）' : (KN[x.kind] || '测验');
+  function tDesc(x) {
+    const w = D.week, un = unlearned().length, c = D.cfg, out = [];
+    for (const p of (x.parts || [x.kind])) {
+      if (p === 'week') out.push('本周词单里的 ' + cards().length + ' 个词全部都考' + (un ? '（还有 ' + un + ' 个没学过' + (c.untaught === 'next' ? '，这次不考，挪到下周）' : '，也会考到，最好先学完）') : ''));
+      if (p === 'review') out.push('从前几周学过的词里抽 ' + c.revN + ' 个左右（以前错过的一定会抽到）');
+      if (p === 'quarter') out.push('从最近这段时间学过的词里抽 ' + c.qN + ' 个左右');
+      if (p === 'year') out.push('从这一年学过的词里抽 ' + c.yN + ' 个左右');
+    }
+    return out.join('；') + '。每个词一题，选择题，及格线 ' + x.pass + '%。';
+  }
   function testHTML() {
-    const w = D.week, t = D.test;
+    const w = D.week, list = D.tests || [];
     if (w.today < w.start) return '<div class="box"><h2>还没开始</h2></div>';
     if (T) return quizHTML();
-    let h = '';
-    if (t && t.done) {
-      const pass = t.passed || t.manual;
-      h += '<div class="card"><h2>' + (w.kind === 'L' ? '本周周测' : '回顾测') + '考完了</h2><div class="stats">' +
-        '<div class="stat"><b>' + t.score + ' / ' + t.total + '</b><span>答对</span></div>' +
-        '<div class="stat"><b>' + Math.floor(t.score * 100 / t.total) + '%</b><span>正确率</span></div>' +
-        '<div class="stat"><b>' + (t.passed ? '及格' : t.manual ? '老师放行' : '没及格') + '</b><span>结果</span></div></div>' +
-        '<div class="muted">' + md(new Date(new Date(w.end + 'T00:00:00').getTime() + 86400000)) + '自动进入下一周。' + (pass ? '' : '错的词会按老师的设置带到下一周再学。') + '</div>' +
-        (D.errbook.length ? '<div><button class="gbtn" data-tab="err">看错词本</button></div>' : '') + '</div>';
-    } else {
-      const n = w.kind === 'L' ? cards().length : null, un = unlearned().length;
-      h += '<div class="card"><h2>' + (w.kind === 'L' ? '本周周测' : '回顾测') + '</h2><div class="muted">' +
-        (w.kind === 'L' ? '本周词单里的 ' + n + ' 个词全部都考，每个词一题，选择题，及格线 ' + D.cfg.pass + '%。' +
-          (un ? '<br>还有 ' + un + ' 个词没学过' + (D.cfg.untaught === 'next' ? '，这次不考，挪到下周。' : '，也会考到，最好先学完。') : '')
-          : '从前几周学过的词里抽题（以前错过的词一定会抽到），及格线 ' + D.cfg.revPass + '%。') +
-        '<br>开始以后可以中途退出，答过的题会记在这台手机上；交卷后就不能再改了。</div>' +
-        '<div><button class="btn main" data-act="tstart">' + (t ? '接着考' : '开始') + '</button></div></div>';
-    }
+    let h = list.length > 1 ? '<div class="muted">这周有 ' + list.length + ' 场测验，按顺序一场一场考。</div>' : '';
+    list.forEach((x, i) => {
+      if (x.done) {
+        h += '<div class="card"><h2>' + tName(x) + ' 考完了</h2><div class="stats">' +
+          '<div class="stat"><b>' + x.score + ' / ' + x.total + '</b><span>答对</span></div>' +
+          '<div class="stat"><b>' + Math.floor(x.score * 100 / x.total) + '%</b><span>正确率</span></div>' +
+          '<div class="stat"><b>' + (x.passed ? '及格' : x.manual ? '老师放行' : '没及格') + '</b><span>结果</span></div></div>' +
+          ((x.parts || []).includes('week') && !(x.passed || x.manual) ? '<div class="muted">错的词会按老师的设置带到下一周再学。</div>' : '') + '</div>';
+      } else {
+        const before = list.slice(0, i).some(y => !y.done);
+        h += '<div class="card"><h2>' + tName(x) + '</h2><div class="muted">' + tDesc(x) + '<br>开始以后可以中途退出，答过的题会记在这台手机上；交卷后就不能再改了。</div>' +
+          '<div><button class="btn main" data-act="tstart" data-kd="' + esc(x.kind) + '"' + (before ? ' disabled' : '') + '>' + (x.started ? '接着考' : '开始') + '</button>' + (before ? ' <span class="muted">先考完上面那场</span>' : '') + '</div></div>';
+      }
+    });
+    if (list.length && list.every(x => x.done)) h += '<div class="muted">' + md(new Date(new Date(w.end + 'T00:00:00').getTime() + 86400000)) + '自动进入下一周。' + (D.errbook.length ? ' <button class="link" data-tab="err">看错词本</button>' : '') + '</div>';
     if (D.history.length) {
       h += '<div class="box"><h2>以前的成绩</h2><div class="scroll"><table class="t"><tr><th>周</th><th>类型</th><th>成绩</th><th>结果</th></tr>' +
-        D.history.map(x => '<tr><td>第 ' + x.no + ' 周</td><td>' + (x.kind === 'L' ? '周测' : '回顾测') + '</td><td>' + (x.total ? x.score + ' / ' + x.total : '没考') + '</td><td>' +
+        D.history.map(x => '<tr><td>第 ' + x.no + ' 周</td><td>' + (KN[x.kind] || x.kind) + '</td><td>' + (x.total ? x.score + ' / ' + x.total : '没考') + '</td><td>' +
           (x.total ? (x.passed ? '<span class="chip ok">及格</span>' : x.manual ? '<span class="chip">放行</span>' : '<span class="chip bad">没及格</span>') : '—') + '</td></tr>').join('') + '</table></div></div>';
     }
     return h;
@@ -122,8 +131,8 @@ const Stu = (() => {
   async function tstart(btn) {
     busy(btn, true);
     try {
-      T = await rpc('stu_test_start');
-      if (!D.test) D.test = { id: T.id, kind: T.kind, done: false };
+      T = await rpc('stu_test_start', { kd: btn.dataset.kd || null });
+      const x = (D.tests || []).find(y => y.kind === T.kind); if (x) { x.started = true; x.id = T.id; }
       ans = restore(T.id) || new Array(T.items.length).fill(null);
       qi = Math.max(0, ans.findIndex(a => a === null)); if (qi < 0) qi = 0;
       render();

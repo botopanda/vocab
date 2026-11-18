@@ -80,7 +80,7 @@ const Adm = (() => {
       '<div class="row"><span>最近一次测验算及格（原分数保留）</span><button class="gbtn" data-d="pass">手动放行</button></div></div>' +
       '<div class="lab">每一周</div><div class="scroll"><table class="t"><tr><th>周</th><th>开始</th><th>词数</th><th>测验</th></tr>' +
       (det.weeks.length ? det.weeks.map(w => '<tr><td>第 ' + w.no + ' 周' + (w.kind === 'R' ? '（回顾）' : '') + (w.extended ? '（延长）' : '') + '</td><td>' + md(w.start) + '</td><td>' + (w.kind === 'L' ? w.n + (w.carry ? '（含错词 ' + w.carry + '）' : '') + (w.extra ? '＋追加 ' + w.extra : '') : '—') + '</td><td>' +
-        (w.done ? w.score + '/' + w.total + ' ' + (w.passed ? '<span class="chip ok">及格</span>' : w.manual ? '<span class="chip">放行</span>' : '<span class="chip bad">没及格</span>') : '没考') + '</td></tr>').join('') : '<tr><td colspan="4" class="muted">学生还没打开过链接</td></tr>') +
+        ((w.tests || []).length ? w.tests.map(x => ({ week: '周测', review: '回顾测', quarter: '季度测', year: '年测' }[x.kind] || '') + ' ' + (x.done ? x.score + '/' + x.total + ' ' + (x.passed ? '<span class="chip ok">及格</span>' : x.manual ? '<span class="chip">放行</span>' : '<span class="chip bad">没及格</span>') : '考到一半')).join('<br>') : '没考') + '</td></tr>').join('') : '<tr><td colspan="4" class="muted">学生还没打开过链接</td></tr>') +
       '</table></div>' +
       '<div class="lab">错过的词（' + det.wrong.length + '）</div>' +
       (det.wrong.length ? '<div class="list">' + det.wrong.slice(0, 60).map(x => '<div class="it"><span><span class="nm" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r) + '</span></span><span class="sub">' + esc(x.m) + ' · 错 ' + x.times + ' 次' + (x.st === 'correct' ? ' · 后来对了' : '') + '</span></div>').join('') + '</div>' : '<div class="muted">还没有。</div>'));
@@ -147,7 +147,7 @@ const Adm = (() => {
     return '<section class="box"><h2>按现在的设置 <small id="sumWho"></small></h2><div class="stats">' +
       '<div class="stat"><b id="sDay"></b><span id="sDayLab">每天新词</span></div><div class="stat"><b id="sWords"></b><span>所选档位的词</span></div><div class="stat"><b id="sWeeks"></b><span id="sYears"></span></div></div>' +
       '<div class="weeks" id="weeks"></div><div class="legend"><span><i style="background:var(--ai-soft)"></i>学新词</span><span><i style="background:var(--warn-bg)"></i>回顾周</span><span>前 16 周；按不追加、不缺学、错词不占名额估算</span></div>' +
-      '<div class="note">改好点下面「保存」，<b>下周一起生效</b>；这一周还按原来的设置学。季度测、年测第一版还没上线，这里先设好数字。</div></section>' +
+      '<div class="note">改好点下面「保存」，<b>下周一起生效</b>；这一周还按原来的设置学。季度测、年测按设置出卷，这里先设好数字。</div></section>' +
       (scope === 'stu' ? '<section class="box"><h2>这个学生用哪个方案</h2><div class="field" style="border-top:0"><div class="fl"><span>方案</span><span class="inh">换方案后，没单独改过的项会跟着新方案走；学过的词和成绩都保留</span></div>' + seg('c-tplOf', '方案', D.plans.map(p => [p.key, esc(p.name)])) + '</div></section>' : '') +
       '<section class="box"><h2>学习量</h2>' + fld('weekly', '每周新词数', stepHTML('weekly')) + fld('days', '每周学几天', stepHTML('days')) +
       fld('addOn', '学完可以「再来一组」', sw('addOn', '学完可以再来一组'), hint('追加的词算进本周，一起考')) + fld('addN', '一组几个', stepHTML('addN')) + '</section>' +
@@ -167,8 +167,8 @@ const Adm = (() => {
       fld('total', '带过去以后，下周学多少', seg('c-total', '下周学多少', [['A', '新词照旧＋错词'], ['B', '总数不变']])) + '<div class="note" id="totalTxt"></div></section>' +
       '<section class="box" id="bxRev"><h2>回顾周 <small id="revOff"></small></h2>' + fld('revN', '抽多少个词来考', stepHTML('revN'), hint('学过的词不够时，有多少考多少')) +
       fld('revMust', '前几周错过的词一定抽到', sw('revMust', '错过的词一定抽到'), hint('错词比上面的数还多时，全部考')) + fld('revPass', '及格线', stepHTML('revPass')) + '</section>' +
-      '<section class="box" id="bxQ"><h2>季度测 <small>第一版还没上线</small></h2>' + fld('qOn', '要季度测', sw('qOn', '要季度测')) + fld('qEvery', '每几周考一次', stepHTML('qEvery')) + fld('qN', '抽多少个词', stepHTML('qN')) + fld('qPass', '及格线', stepHTML('qPass')) + '</section>' +
-      '<section class="box" id="bxY"><h2>年测 <small>第一版还没上线</small></h2>' + fld('yOn', '要年测', sw('yOn', '要年测')) + fld('yEvery', '每几周考一次', stepHTML('yEvery')) + fld('yN', '抽多少个词', stepHTML('yN')) + fld('yPass', '及格线', stepHTML('yPass')) + '</section>' +
+      '<section class="box" id="bxQ"><h2>季度测 <small>按设置出卷</small></h2>' + fld('qOn', '要季度测', sw('qOn', '要季度测')) + fld('qEvery', '每几周考一次', stepHTML('qEvery')) + fld('qN', '抽多少个词', stepHTML('qN')) + fld('qPass', '及格线', stepHTML('qPass')) + '</section>' +
+      '<section class="box" id="bxY"><h2>年测 <small>按设置出卷</small></h2>' + fld('yOn', '要年测', sw('yOn', '要年测')) + fld('yEvery', '每几周考一次', stepHTML('yEvery')) + fld('yN', '抽多少个词', stepHTML('yN')) + fld('yPass', '及格线', stepHTML('yPass')) + '</section>' +
       '<section class="box"><h2>几场测验撞在同一周</h2>' + fld('merge', '怎么考', seg('c-merge', '同一周几场测验', [['merge', '合成一场'], ['both', '分开考']])) + '</section>' +
       '<section class="box"><h2>拼图</h2>' + fld('dim', '回顾测答错时，格子变暗', sw('dim', '答错时格子变暗'), hint('关着＝不变暗，只记进错词本')) + '</section>';
   }
