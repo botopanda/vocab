@@ -1,13 +1,13 @@
 // 单词学习系统 · 管理端：学生、设置面板（全局 → 方案 → 学生三层）、改动记录
 const Adm = (() => {
   let D = null, tab = 'stu', scope = 'global', tplKey = 'weak', stuKey = null, draft = null;
-  const NUM = { weekly: ['个', 10, 500, 10], days: ['天', 1, 7, 1], addN: ['个', 5, 100, 5], learnW: ['周', 1, 12, 1], revW: ['周', 0, 4, 1], pass: ['%', 50, 100, 5],
+  const NUM = { srsN: ['个', 0, 200, 5], weekly: ['个', 10, 500, 10], days: ['天', 1, 7, 1], addN: ['个', 5, 100, 5], learnW: ['周', 1, 12, 1], revW: ['周', 0, 4, 1], pass: ['%', 50, 100, 5],
     revN: ['个', 10, 500, 10], revPass: ['%', 50, 100, 5], qEvery: ['周', 4, 52, 1], qN: ['个', 10, 1000, 10], qPass: ['%', 50, 100, 5], yEvery: ['周', 12, 104, 1], yN: ['个', 10, 2000, 10], yPass: ['%', 50, 100, 5] };
   const LAB = { weekly: '每周新词数', days: '每周学几天', addOn: '再来一组', addN: '一组几个', mode: '学法', ratio: '各档比例', start: '从哪一档开始', only: '学哪几档',
-    learnW: '先学几周', revW: '回顾几周', untaught: '还没学的词', pass: '周测及格线', types: '周测题型', carryFail: '没及格带错词', carryPass: '及格也带错词', total: '下周学多少',
+    srsOn: '每天复习', srsN: '每天最多复习', learnW: '先学几周', revW: '回顾几周', untaught: '还没学的词', pass: '周测及格线', types: '周测题型', carryFail: '没及格带错词', carryPass: '及格也带错词', total: '下周学多少',
     revN: '回顾周抽多少', revMust: '错词一定抽到', revPass: '回顾周及格线', qOn: '季度测', qEvery: '季度测间隔', qN: '季度测抽多少', qPass: '季度测及格线',
     yOn: '年测', yEvery: '年测间隔', yN: '年测抽多少', yPass: '年测及格线', merge: '同周测验', dim: '答错变暗', tplOf: '方案' };
-  const SW = ['addOn', 'carryFail', 'carryPass', 'revMust', 'qOn', 'yOn', 'dim'];
+  const SW = ['srsOn', 'addOn', 'carryFail', 'carryPass', 'revMust', 'qOn', 'yOn', 'dim'];
   const SEGS = [['mode', 'c-mode'], ['total', 'c-total'], ['start', 'c-start'], ['untaught', 'c-untaught'], ['merge', 'c-merge']];
   const DEF_RATIO = [9, 8, 27, 22, 34];
   const clone = o => JSON.parse(JSON.stringify(o)), same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -15,8 +15,8 @@ const Adm = (() => {
   const CNT = () => LV.map(l => +(D.counts[l] || 0));
   const stuOf = id => D.students.find(s => s.id === id);
 
-  function start(d) { D = d; $('app').dataset.role = 'adm'; if (!D.plans.some(p => p.key === tplKey)) tplKey = D.plans[0].key; render(); }
-  async function reload() { try { D = await rpc('adm_load'); } catch (e) { fail(e); } if (!D.plans.some(p => p.key === tplKey)) tplKey = D.plans[0].key; render(); }
+  function start(d) { D = d; D.global = Object.assign({ srsOn: true, srsN: 20 }, D.global); $('app').dataset.role = 'adm'; if (!D.plans.some(p => p.key === tplKey)) tplKey = D.plans[0].key; render(); }
+  async function reload() { try { D = await rpc('adm_load'); D.global = Object.assign({ srsOn: true, srsN: 20 }, D.global); } catch (e) { fail(e); } if (!D.plans.some(p => p.key === tplKey)) tplKey = D.plans[0].key; render(); }
 
   function render() {
     const tabs = [['stu', '学生'], ['cfg', '设置'], ['log', '改动记录']];
@@ -37,7 +37,7 @@ const Adm = (() => {
     if (!D.students.length) return h + '<div class="box"><h2>还没有学生</h2><div class="muted">点右上角「加学生」，加好后把专属链接发给学生，学生用手机打开就能学。</div></div>';
     h += '<div class="box"><div class="list">' + D.students.map(s => {
       const w = s.week, lt = s.last_test;
-      return '<div class="it clickable" data-stu="' + s.id + '"><div><div class="nm">' + esc(s.name) + (s.active ? '' : ' <span class="chip bad">已停用</span>') + '</div>' +
+      return '<div class="it clickable" data-stu="' + s.id + '"><div><div class="nm">' + esc(s.name) + (s.grp ? ' <span class="chip">' + esc(s.grp) + '</span>' : '') + (s.streak ? ' <span class="chip ok">连续 ' + s.streak + ' 天</span>' : '') + (s.active ? '' : ' <span class="chip bad">已停用</span>') + '</div>' +
         '<div class="sub">' + esc(t[s.plan] || s.plan) + (Object.keys(s.ov || {}).length ? ' · 单独改了 ' + Object.keys(s.ov).length + ' 项' : '') + (s.next_cut != null ? ' · 下周只学 ' + s.next_cut + ' 个' : '') + '</div></div>' +
         '<div class="sub" style="text-align:right">' + (w ? '第 ' + w.no + ' 周' + (w.kind === 'R' ? '（回顾）' : '') : md(s.start) + ' 开始') + ' · 学过 ' + s.learned + ' · 答对 ' + s.correct +
         '<br>' + (lt ? '最近测验 ' + lt.score + '/' + lt.total + (lt.passed ? ' 及格' : lt.manual ? ' 放行' : ' 没及格') : '还没考过') + ' · ' + (s.last_seen ? '最后打开 ' + stamp(s.last_seen) : '还没打开过') + '</div></div>';
@@ -100,13 +100,14 @@ const Adm = (() => {
   function editModal(sid) {
     const s = stuOf(sid);
     const m = modal('<h2>改学生信息</h2><form class="form" id="edf"><label>名字<input id="en" maxlength="30" value="' + esc(s.name) + '" required></label>' +
+      '<label>班级（同一个班的同学互相看得到打卡天数和本周进度；不分班就空着）<input id="eg" maxlength="20" value="' + esc(s.grp || '') + '" list="grps"><datalist id="grps">' + [...new Set(D.students.map(x => x.grp).filter(Boolean))].map(g => '<option value="' + esc(g) + '">').join('') + '</datalist></label>' +
       '<label>备注（只有管理端看得到）<textarea id="em" rows="3" maxlength="500">' + esc(s.memo) + '</textarea></label>' +
       '<label><span><input type="checkbox" id="ea"' + (s.active ? ' checked' : '') + '> 在用（取消勾选 ＝ 停用，学生链接打不开，记录都保留）</span></label>' +
       '<div class="row"><button type="button" class="btn" data-close>取消</button><button class="btn main" id="esub">保存</button></div>' +
       '<div class="muted">怀疑链接被别人拿到了：<button type="button" class="link" id="fresh">换一条新链接</button>（旧链接马上失效）</div></form>');
     m.querySelector('#edf').addEventListener('submit', async e => {
       e.preventDefault(); const b = m.querySelector('#esub'); busy(b, true);
-      try { await rpc('adm_student_edit', { sid, nm: m.querySelector('#en').value, mm: m.querySelector('#em').value, act: m.querySelector('#ea').checked }); m.remove(); toast('已保存'); await reload(); }
+      try { await rpc('adm_student_edit', { sid, nm: m.querySelector('#en').value, mm: m.querySelector('#em').value, act: m.querySelector('#ea').checked, g: m.querySelector('#eg').value }); m.remove(); toast('已保存'); await reload(); }
       catch (er) { fail(er); busy(b, false); }
     });
     m.querySelector('#fresh').addEventListener('click', async e => {
@@ -158,6 +159,7 @@ const Adm = (() => {
       '</div><div class="sumline" id="ratioSum"><span id="ratioTxt"></span><button type="button" class="gbtn" id="ratioReset">按词库存量算</button></div></div>' +
       '<div class="sub2" id="pStep">' + fld('start', '从哪一档开始', seg('c-start', '从哪一档开始', LV.map(l => [l, l]))) + '<div class="note" id="stepTxt"></div></div>' +
       '<div class="sub2" id="pOnly">' + fld('only', '学哪几档', '<div class="checks" id="c-only">' + LV.map((l, i) => '<button type="button" class="ck" data-v="' + l + '" aria-pressed="false">' + l + ' · ' + CN[i] + '</button>').join('') + '</div>') + '<div class="note" id="onlyTxt"></div></div></section>' +
+      '<section class="box" id="bxSrs"><h2>每天复习 <small>按遗忘曲线：学过的词隔 1、2、4、7、15 天回来一次</small></h2>' + fld('srsOn', '要每天复习', sw('srsOn', '要每天复习')) + fld('srsN', '每天最多复习几个', stepHTML('srsN'), hint('到期的词比这个多时，按到期早的先复习，剩下的明天接着来')) + '</section>' +
       '<section class="box"><h2>学习循环</h2>' + fld('learnW', '先学几周新词', stepHTML('learnW')) + fld('revW', '接着回顾几周', stepHTML('revW'), hint('填 0 就是不要回顾周')) + '</section>' +
       '<section class="box"><h2>周测</h2><div class="field"><div class="fl"><span>考哪些词</span></div><span class="lock">本周词单里的全部词，不抽查（含追加的、带过来的错词）</span></div>' +
       fld('untaught', '到周测时还没学的词', seg('c-untaught', '还没学的词', [['test', '照考'], ['next', '不考，挪到下周']])) +
@@ -268,7 +270,7 @@ const Adm = (() => {
     else { const k = Math.min(err, e.weekly); t += '下周还是 <b>' + e.weekly + '</b> 个（' + k + ' 个错词＋' + (e.weekly - k) + ' 个新词）。'; }
     $('totalTxt').innerHTML = t;
     $('revOff').textContent = e.revW === 0 ? '现在没有回顾周，下面的设置不起作用' : '';
-    lockBox('bxRev', e.revW === 0); lockBox('bxQ', !e.qOn, 'qOn'); lockBox('bxY', !e.yOn, 'yOn');
+    lockBox('bxRev', e.revW === 0); lockBox('bxSrs', !e.srsOn, 'srsOn'); lockBox('bxQ', !e.qOn, 'qOn'); lockBox('bxY', !e.yOn, 'yOn');
     const fa = $('fd-addN'); fa.classList.toggle('dim', !e.addOn); fa.querySelectorAll('input,button').forEach(x => x.disabled = !e.addOn);
     const P = plan(e), T = P.length, q = Math.floor(e.weekly / e.days), r = e.weekly % e.days;
     $('sDay').textContent = r ? q + '～' + (q + 1) : q;

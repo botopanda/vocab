@@ -1,10 +1,13 @@
 // 单词学习系统 · 学生端：本周学习、测验、错词本、拼图地图
 const Stu = (() => {
   let D = null, tab = 'study';
-  let queue = [], flipped = false, again = new Set(), mode = 'new';   // mode: new 学没学过的 / all 再过一遍
+  let queue = [], flipped = false, again = new Set(), mode = 'new';   // mode: new 学没学过的 / all 再过一遍 / rev 今天的复习
+  let revDone = new Set();
   let T = null, ans = [], qi = 0;                                      // 进行中的测验
 
   const cards = () => D.cards || [];
+  const pool = () => mode === 'rev' ? (D.review || []) : cards();
+  const revLeft = () => (D.review || []).filter(c => !revDone.has(c.id));
   const unlearned = () => cards().filter(c => c.st === 'assigned');
   const lsKey = id => 'vocab_ans_' + id;
   const save = () => { try { if (T) localStorage.setItem(lsKey(T.id), JSON.stringify(ans)); } catch (e) {} };
@@ -13,12 +16,12 @@ const Stu = (() => {
 
   function start(d) { D = d; resetQueue(); render(); }
   async function reload() { try { D = await rpc('stu_load'); } catch (e) { fail(e); } resetQueue(); render(); }
-  function resetQueue() { queue = (mode === 'all' ? cards() : unlearned()).map(c => c.id); flipped = false; again = new Set(); }
+  function resetQueue() { queue = (mode === 'rev' ? revLeft() : mode === 'all' ? cards() : unlearned()).map(c => c.id); flipped = false; again = new Set(); }
   // 换到地图/错词本时重新拿数据，但不打乱正在学的这一轮
   async function keepQueue(fn) {
     const q = queue.slice(), f = flipped, a = new Set(again);
     try { D = await rpc('stu_load'); } catch (e) { fail(e); }
-    const ids = new Set(cards().map(c => c.id));
+    const ids = new Set(pool().map(c => c.id));
     queue = q.filter(id => ids.has(id)); flipped = f && queue.length > 0; again = a;
     render();
   }
@@ -26,11 +29,11 @@ const Stu = (() => {
   function header() {
     const w = D.week, L = w.kind === 'L', tot = cards().length, done = tot - unlearned().length;
     const daily = Math.ceil(tot / Math.max(1, D.cfg.days));
-    const tabs = [['study', '学习'], ['test', '测验'], ['err', '错词本'], ['map', '地图']];
+    const tabs = [['study', '学习'], ['test', '测验'], ['err', '错词本'], ['map', '进度']];
     return '<header class="top"><div class="wrap">' +
-      '<div class="row"><div class="brand"><b>' + esc(D.me.name) + '</b><span>第 ' + w.no + ' 周 · ' + (L ? '学新词' : '回顾周') + ' · ' + md(w.start) + '～' + md(w.end) + (w.extended ? '（已延长）' : '') + '</span></div></div>' +
+      '<div class="row"><div class="brand"><b>' + esc(D.me.name) + '</b><span>第 ' + w.no + ' 周 · ' + (L ? '学新词' : '回顾周') + ' · ' + md(w.start) + '～' + md(w.end) + (w.extended ? '（已延长）' : '') + '</span></div>' + (D.stats ? '<span class="chip' + (D.stats.streak ? ' ok' : '') + '">连续 ' + D.stats.streak + ' 天</span>' : '') + '</div>' +
       '<div class="seg" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k) + '">' + n + (k === 'err' && D.errbook.length ? ' ' + D.errbook.length : '') + '</button>').join('') + '</div>' +
-      (L && tab === 'study' ? '<div class="prog"><span>本周学过 ' + done + ' / ' + tot + ' · 每天约 ' + daily + ' 个</span><div class="track"><div class="fill" style="width:' + (tot ? done / tot * 100 : 0) + '%"></div></div></div>' : '') +
+      (L && tab === 'study' && mode !== 'rev' ? '<div class="prog"><span>本周学过 ' + done + ' / ' + tot + ' · 每天约 ' + daily + ' 个</span><div class="track"><div class="fill" style="width:' + (tot ? done / tot * 100 : 0) + '%"></div></div></div>' : '') +
       '</div></header>';
   }
 
@@ -46,16 +49,27 @@ const Stu = (() => {
   }
 
   // ── 学习 ──
+  function revBox() {
+    const n = revLeft().length;
+    if (!D.cfg.srsOn || mode === 'rev') return '';
+    if (!n) return (D.review || []).length ? '<div class="note">今天该复习的词都复习完了。</div>' : '';
+    return '<div class="box"><h2>今天该复习 ' + n + ' 个 <small>按遗忘曲线，学过的词隔 1、2、4、7、15 天回来一次</small></h2><div><button class="btn main" data-act="rev">先复习这 ' + n + ' 个</button></div></div>';
+  }
   function studyHTML() {
     const w = D.week;
     if (w.today < w.start) return '<div class="box"><h2>还没开始</h2><div class="muted">第 1 周从 ' + md(w.start) + ' 开始，到时候再来。</div></div>';
-    if (w.kind === 'R') return '<div class="box"><h2>这周是回顾周</h2><div class="muted">这周不学新词。把前几周的词再过一遍，然后去「测验」做回顾测（从学过的词里抽题，及格线 ' + D.cfg.revPass + '%）。</div><div><button class="btn main" data-tab="test">去回顾测</button></div></div>' +
+    if (mode === 'rev') {
+      if (!queue.length) return '<div class="card"><h2>今天的复习做完了</h2><div class="muted">「会了」的词会隔得越来越久再出现；「不会」的明天再来。</div><div><button class="btn main" data-act="back">' + (w.kind === 'L' && unlearned().length ? '继续学新词' : '好的') + '</button></div></div>';
+      return cardHTML(pool().find(x => x.id === queue[0]), '复习');
+    }
+    const top = revBox();
+    if (w.kind === 'R') return top + '<div class="box"><h2>这周是回顾周</h2><div class="muted">这周不学新词。把前几周的词再过一遍，然后去「测验」做回顾测（从学过的词里抽题，及格线 ' + D.cfg.revPass + '%）。</div><div><button class="btn main" data-tab="test">去回顾测</button></div></div>' +
       (D.errbook.length ? '<div class="box"><h2>先看看错过的词</h2><div class="muted">一共 ' + D.errbook.length + ' 个，在「错词本」里。</div><div><button class="gbtn" data-tab="err">打开错词本</button></div></div>' : '');
-    if (!cards().length) return '<div class="box"><h2>这周没有新词</h2><div class="muted">可能是这个范围的词已经全部学完了，或者老师给你暂停了一周。</div></div>';
+    if (!cards().length) return top + '<div class="box"><h2>这周没有新词</h2><div class="muted">可能是这个范围的词已经全部学完了，或者老师给你暂停了一周。</div></div>';
     if (!queue.length) {
       const tested = (D.tests || []).some(x => x.done && (x.parts || []).includes('week'));
       const canMore = D.cfg.addOn && !(D.tests || []).some(x => x.started && (x.parts || []).includes('week'));
-      return '<div class="card"><h2>' + (mode === 'all' ? '这一遍过完了' : '本周的 ' + cards().length + ' 个词都学过了') + '</h2>' +
+      return top + '<div class="card"><h2>' + (mode === 'all' ? '这一遍过完了' : '本周的 ' + cards().length + ' 个词都学过了') + '</h2>' +
         '<div class="muted">' + (tested ? '周测已经考完了。' : '学完记得去做周测：本周的词全部都考，及格线 ' + D.cfg.pass + '%。') + '</div>' +
         '<div class="form">' +
         (!tested ? '<button class="btn main" data-tab="test">去周测</button>' : '') +
@@ -63,10 +77,12 @@ const Stu = (() => {
         (canMore ? '<button class="btn" data-act="more">再来一组（' + D.cfg.addN + ' 个，算进本周、一起考）</button>' : '') +
         '</div></div>';
     }
-    const c = cards().find(x => x.id === queue[0]);
+    return (flipped ? '' : top) + cardHTML(cards().find(x => x.id === queue[0]), '');
+  }
+  function cardHTML(c, tag) {
     if (!flipped) {
       return '<div class="card front" id="front" tabindex="0" role="button" aria-label="翻面看答案"><div class="chips"><span class="chip">' + esc(c.lvl) + '</span>' +
-        (again.has(c.id) ? '<span class="chip bad">再来一次</span>' : '') + (D.cards.find(x => x.id === c.id && x.wrong > 0) ? '<span class="chip warn">错过的词</span>' : '') + '</div>' +
+        (tag ? '<span class="chip ok">' + tag + '</span>' : '') + (again.has(c.id) ? '<span class="chip bad">再来一次</span>' : '') + (c.wrong > 0 ? '<span class="chip warn">错过的词</span>' : '') + '</div>' +
         '<div class="big" lang="ja">' + esc(c.w) + '</div><div class="hint">先想一想意思，再点一下翻面</div></div>' +
         '<div class="bar one"><button class="btn main" data-act="flip">翻面看答案 <span class="k">空格</span></button></div>' +
         '<div class="muted" style="text-align:center">这一轮还剩 ' + queue.length + ' 个</div>';
@@ -78,10 +94,17 @@ const Stu = (() => {
   function rate(a) {
     if (!flipped || !queue.length) return;
     stopAudio();
-    const id = queue.shift(), c = cards().find(x => x.id === id);
-    if (c && c.st === 'assigned') { c.st = 'learned'; rpc('stu_rate', { wid: id }).catch(fail); }
+    const id = queue.shift(), c = pool().find(x => x.id === id);
+    if (mode === 'rev') { if (!revDone.has(id)) { revDone.add(id); rpc('stu_review', { wid: id, rating: a }).catch(fail); bumpStreak(); } }
+    else if (c && c.st === 'assigned') { c.st = 'learned'; rpc('stu_rate', { wid: id }).catch(fail); bumpStreak(); }
     if (a !== 'ok') { again.add(id); queue.splice(Math.min(a === 'no' ? 2 : 5, queue.length), 0, id); if (queue.length === 1) toast('只剩这一个词了，再来一次'); }
     flipped = false; render(); window.scrollTo({ top: 0 });
+  }
+  // 今天第一次学，顶部的连续天数马上加 1（服务器那边已经记了打卡）
+  function bumpStreak() {
+    const s = D.stats; if (!s) return;
+    s.last30 = s.last30 || [];
+    if (!s.last30.includes(D.week.today)) { s.last30.push(D.week.today); s.streak++; s.days = (s.days || 0) + 1; }
   }
   async function more(btn) {
     busy(btn, true);
@@ -179,10 +202,27 @@ const Stu = (() => {
   }
 
   // ── 拼图地图 ──
+  // 成就：达到就点亮
+  const BADGES = [
+    ['streak', 3, '连续 3 天'], ['streak', 7, '连续 7 天'], ['streak', 30, '连续 30 天'], ['streak', 100, '连续 100 天'],
+    ['learned', 100, '学过 100 个'], ['learned', 500, '学过 500 个'], ['learned', 1000, '学过 1000 个'], ['learned', 3000, '学过 3000 个'],
+    ['correct', 100, '答对 100 个'], ['correct', 700, '答对 700 个'], ['passed', 1, '第一次及格'], ['passed', 10, '及格 10 次'],
+  ];
   function mapHTML() {
-    const c = D.cfg, si = LV.indexOf(c.start);
+    const c = D.cfg, si = LV.indexOf(c.start), s = D.stats || { streak: 0, learned: 0, correct: 0, passed: 0, days: 0, last30: [] };
     const skipped = l => c.mode === 'only' ? !(c.only || []).includes(l) : c.mode === 'step' ? LV.indexOf(l) < si : false;
-    let h = '<div class="muted">学过的词先半亮，测验答对了全亮。</div>';
+    let h = '<div class="box"><h2>我的进度</h2><div class="stats">' +
+      '<div class="stat"><b>' + s.streak + ' 天</b><span>连续打卡</span></div><div class="stat"><b>' + s.learned + '</b><span>学过的词</span></div><div class="stat"><b>' + s.correct + '</b><span>测验答对（全亮）</span></div></div>';
+    // 最近 30 天，学过的那天亮一格
+    const on = new Set(s.last30 || []), today = new Date(D.week.today + 'T00:00:00');
+    let cal = ''; for (let i = 29; i >= 0; i--) { const d = new Date(today.getTime() - i * 86400000), p = n => String(n).padStart(2, '0'), k = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); cal += '<i' + (on.has(k) ? ' class="f"' : '') + ' title="' + (d.getMonth() + 1) + '月' + d.getDate() + '日"></i>'; }
+    h += '<div class="lab muted">最近 30 天（学过卡、复习过或考过试就亮）</div><div class="cal">' + cal + '</div>';
+    h += '<div class="lab muted">成就</div><div class="badges">' + BADGES.map(([k, n, name]) => '<span class="badge' + ((s[k] || 0) >= n ? ' got' : '') + '">' + name + '</span>').join('') + '</div></div>';
+    if ((D.class || []).length) {
+      h += '<div class="box"><h2>' + esc(D.me.grp) + ' <small>同班同学，按名字排</small></h2><div class="list">' + D.class.map(m =>
+        '<div class="it"><span class="nm">' + esc(m.name) + (m.me ? ' <span class="chip">我</span>' : '') + '</span><span class="sub">' + (m.today ? '<span class="chip ok">今天学了</span> ' : '') + '连续 ' + m.streak + ' 天 · 本周学过 ' + m.week + ' 个</span></div>').join('') + '</div></div>';
+    }
+    h += '<div class="muted">词库地图：学过的词先半亮，测验答对了全亮。</div>';
     for (const l of LV) {
       const m = D.map[l];
       if (!m) { h += '<div class="box"><h2>' + l + ' <small>还没有放进词库</small></h2></div>'; continue; }
@@ -209,6 +249,8 @@ const Stu = (() => {
     const act = a.dataset.act;
     if (act === 'flip') flip();
     else if (act === 'all') { mode = 'all'; resetQueue(); render(); }
+    else if (act === 'rev') { mode = 'rev'; resetQueue(); render(); window.scrollTo({ top: 0 }); }
+    else if (act === 'back') { mode = 'new'; resetQueue(); render(); window.scrollTo({ top: 0 }); }
     else if (act === 'more') more(a);
     else if (act === 'tstart') tstart(a);
     else if (act === 'prev') { qi = Math.max(0, qi - 1); render(); }
