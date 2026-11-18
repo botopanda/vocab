@@ -10,6 +10,9 @@ const Adm = (() => {
   const SW = ['srsOn', 'addOn', 'carryFail', 'carryPass', 'revMust', 'qOn', 'yOn', 'dim'];
   const SEGS = [['mode', 'c-mode'], ['total', 'c-total'], ['start', 'c-start'], ['untaught', 'c-untaught'], ['merge', 'c-merge']];
   const DEF_RATIO = [9, 8, 27, 22, 34];
+  // 测验题型：前 5 种是 JLPT 题型（题库里的题），没写过的默认开；后 3 种简单题没写过的默认关
+  const TYPES = [['yomi', '漢字読み（读音）'], ['hyoki', '表記（汉字写法）'], ['bunmyaku', '文脈規定（填空）'], ['iikae', '言い換え（近义）'], ['yoho', '用法（哪句用得对）'], ['jc', '看日语选中文'], ['cj', '看中文选日语'], ['kr', '看汉字选读音']];
+  const typeOn = (v, t) => v && typeof v[t] === 'boolean' ? v[t] : ['yomi', 'hyoki', 'bunmyaku', 'iikae', 'yoho'].includes(t);
   const canon = v => Array.isArray(v) ? v.map(canon) : (v && typeof v === 'object') ? Object.keys(v).sort().reduce((o, k) => (o[k] = canon(v[k]), o), {}) : v;
   const clone = o => JSON.parse(JSON.stringify(o)), same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
   const TPL = () => Object.fromEntries(D.plans.map(p => [p.key, p.name]));
@@ -170,7 +173,7 @@ const Adm = (() => {
       '<section class="box"><h2>周测</h2><div class="field"><div class="fl"><span>考哪些词</span></div><span class="lock">本周词单里的全部词，不抽查（含追加的、带过来的错词）</span></div>' +
       fld('untaught', '到周测时还没学的词', seg('c-untaught', '还没学的词', [['test', '照考'], ['next', '不考，挪到下周']])) +
       fld('pass', '及格线', stepHTML('pass')) +
-      fld('types', '题型', '<div class="checks" id="c-types"><button type="button" class="ck" data-v="jc" aria-pressed="false">看日语选中文</button><button type="button" class="ck" data-v="cj" aria-pressed="false">看中文选日语</button><button type="button" class="ck" data-v="kr" aria-pressed="false">看汉字选读音</button></div>', hint('每个词只考一题，从勾选的题型里随机出')) +
+      fld('types', '题型', '<div class="checks" id="c-types">' + TYPES.map(([v, nm]) => '<button type="button" class="ck" data-v="' + v + '" aria-pressed="false">' + nm + '</button>').join('') + '</div>', hint('每个词只考一题，从勾选的题型里随机出。前 5 种是 JLPT 考试题型（题库里出好的题）；这个词题库里没有的题型就换别的，都没有时出「看日语选中文」')) +
       fld('carryFail', '没及格时，错词带到下周', sw('carryFail', '没及格时错词带到下周')) + fld('carryPass', '及格了但有错词，也带到下周', sw('carryPass', '及格了但有错词也带到下周')) +
       fld('total', '带过去以后，下周学多少', seg('c-total', '下周学多少', [['A', '新词照旧＋错词'], ['B', '总数不变']])) + '<div class="note" id="totalTxt"></div></section>' +
       '<section class="box" id="bxRev"><h2>回顾周 <small id="revOff"></small></h2>' + fld('revN', '抽多少个词来考', stepHTML('revN'), hint('学过的词不够时，有多少考多少')) +
@@ -202,7 +205,7 @@ const Adm = (() => {
     if (k === 'mode') return { mix: '按比例混合', step: '逐级', only: '只学某几档' }[v];
     if (k === 'ratio') return v.join(' / ');
     if (k === 'only') return v.join('、');
-    if (k === 'types') return ['jc', 'cj', 'kr'].filter(t => v[t]).map(t => ({ jc: '日→中', cj: '中→日', kr: '汉字→读音' }[t])).join('、');
+    if (k === 'types') return TYPES.filter(([t]) => typeOn(v, t)).map(([, nm]) => nm).join('、') || '（无）';
     if (k === 'total') return v === 'A' ? '新词照旧＋错词' : '总数不变';
     if (k === 'untaught') return v === 'test' ? '照考' : '挪到下周';
     if (k === 'merge') return v === 'merge' ? '合成一场' : '分开考';
@@ -249,7 +252,7 @@ const Adm = (() => {
     const e = eff(), b = scope === 'global' ? null : base(), o = scope === 'global' ? null : ov();
     SEGS.forEach(([k, id]) => { const g = $(id); if (g) g.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x.dataset.v === e[k] ? 'true' : 'false')); });
     $('c-only').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', (e.only || []).includes(x.dataset.v) ? 'true' : 'false'));
-    $('c-types').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', e.types && e.types[x.dataset.v] ? 'true' : 'false'));
+    $('c-types').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', typeOn(e.types, x.dataset.v) ? 'true' : 'false'));
     if (scope === 'stu') $('c-tplOf').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x.dataset.v === draft.tpl ? 'true' : 'false'));
     SW.forEach(k => $('f-' + k).setAttribute('aria-checked', e[k] ? 'true' : 'false'));
     for (const k in D.global) {
@@ -334,7 +337,7 @@ const Adm = (() => {
     const ck = t.closest('.ck'); if (ck) {
       const id = ck.parentElement.id, v = ck.dataset.v, cur = eff();
       if (id === 'c-only') { let a = (cur.only || []).slice(); a = a.includes(v) ? a.filter(x => x !== v) : LV.filter(l => a.includes(l) || l === v); if (!a.length) { toast('至少要学一档'); return; } setVal('only', a); }
-      else { const o = clone(cur.types || {}); o[v] = !o[v]; if (!o.jc && !o.cj && !o.kr) { toast('至少要留一种题型'); return; } setVal('types', o); }
+      else { const o = {}; TYPES.forEach(([t]) => o[t] = typeOn(cur.types, t)); o[v] = !o[v]; if (!TYPES.some(([t]) => o[t])) { toast('至少要留一种题型'); return; } setVal('types', o); }
       return;
     }
     const rs = t.closest('[data-reset]'); if (rs) { delete ov()[rs.dataset.reset]; syncInputs(); refresh(); return; }

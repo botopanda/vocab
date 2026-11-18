@@ -85,6 +85,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .ex{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;align-items:start;padding-top:10px;border-top:1px solid var(--line)}
 .jp{font-family:var(--jp);font-size:17px;line-height:2.15;min-width:0}
 .zh{grid-column:1/2;color:var(--muted);font-size:14px;line-height:1.5}
+ruby{ruby-align:center}
 ruby rt{font-size:.52em;color:var(--muted);font-weight:400}
 mark{background:var(--hl);color:inherit;border-radius:4px;padding:0 2px}
 /* 测验 */
@@ -93,6 +94,22 @@ mark{background:var(--hl);color:inherit;border-radius:4px;padding:0 2px}
 .opts{display:grid;gap:8px}
 .opt{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:13px 14px;text-align:left;cursor:pointer;font-size:16px}
 .opt.jpo{font-family:var(--jp)}
+.qs{font-family:var(--mincho);font-size:clamp(19px,5.4vw,24px);line-height:2.1;padding-block:14px 10px;word-break:break-word}
+.qs.sm{font-size:17px;line-height:2;padding-block:2px}
+.qs mark,.rvo mark,.opt mark{background:none;color:inherit;border-radius:0;padding:0;text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:6px}
+.qs rt,.opt rt,.rvo rt{font-size:.5em;font-family:var(--jp);font-weight:400}
+.blank{white-space:pre;letter-spacing:.1em}
+.opt .no{display:inline-block;min-width:1.7em;color:var(--muted);font-family:var(--sans);font-size:13px}
+.opts.long .opt{font-size:15px;line-height:2.1}
+.rvs{display:grid;gap:10px;margin-block:6px 12px}
+.rv{border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:grid;gap:4px}
+.rvh{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}.rvh .sub{margin-left:auto;color:var(--muted);font-size:14px}
+.rvq{font-family:var(--jp);font-size:18px}
+.rvo{display:grid;gap:2px;font-size:15px;line-height:2}
+.rvo>div{padding:1px 6px;border-radius:7px}.rvo i{font-style:normal;display:inline-block;min-width:1.6em;color:var(--muted)}
+.rvo .ok{background:var(--ok-bg)}.rvo .ok i{color:var(--ok);font-weight:700}
+.rvo .bad{background:var(--bad-bg)}.rvo .bad i{color:var(--bad);font-weight:700}
+.why{font-size:14px;line-height:1.65;background:var(--hl);border-radius:8px;padding:6px 9px}
 .opt.sel{border-color:var(--ai);background:var(--ai-soft);color:var(--ai)}
 .stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .stat{background:var(--bg);border-radius:10px;padding:8px 12px;min-width:0}

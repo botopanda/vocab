@@ -182,13 +182,26 @@ const Stu = (() => {
       starting = false; render();
     } catch (e) { starting = false; fail(e); render(); }
   }
+  // 题型：问法、题干、选项的样子
+  const QT = {
+    jc: '这个词是什么意思？', cj: '哪个日语词是这个意思？', kr: '这个词怎么读？',
+    yomi: '画线的词怎么读？', hyoki: '画线的词用汉字怎么写？', bunmyaku: '（　）里放哪个最合适？',
+    iikae: '哪个和画线部分的意思最接近？', yoho: '这个词用得对的是哪一句？',
+  };
+  const isJ = t => ['yomi', 'hyoki', 'bunmyaku', 'iikae', 'yoho'].includes(t);
+  const sentHTML = (q, cls) => '<div class="qs' + (cls || '') + '" lang="ja">' + rb(q).replace(/（　）/g, '<span class="blank">（　　）</span>') + '</div>';
+  const stemHTML = it => isJ(it.t) && it.t !== 'yoho' ? sentHTML(it.q)
+    : '<div class="q' + (it.t === 'cj' ? ' zhq' : '') + '" lang="' + (it.t === 'cj' ? 'zh' : 'ja') + '">' + esc(it.q) + '</div>';
+  const optHTML = (it, o) => isJ(it.t) ? rb(o) : esc(o);
+  const jpOpt = t => t !== 'jc';
+  function qBody(it, sel) {
+    return '<div class="muted">' + (QT[it.t] || '') + '</div>' + stemHTML(it) +
+      '<div class="opts' + (it.t === 'yoho' ? ' long' : '') + '">' + it.o.map((o, j) => '<button type="button" class="opt' + (jpOpt(it.t) ? ' jpo' : '') + (sel === j ? ' sel' : '') + '" data-opt="' + j + '"' + (jpOpt(it.t) ? ' lang="ja"' : '') + '><span class="no">' + (j + 1) + '</span>' + optHTML(it, o) + '</button>').join('') + '</div>';
+  }
   function quizHTML() {
     const it = T.items[qi], n = T.items.length, answered = ans.filter(a => a !== null).length;
-    const zhq = it.t === 'cj', jpOpt = it.t !== 'jc';
-    const ask = { jc: '这个词是什么意思？', cj: '哪个日语词是这个意思？', kr: '这个词怎么读？' }[it.t];
     return '<div class="prog"><span>第 ' + (qi + 1) + ' / ' + n + ' 题 · 已答 ' + answered + '</span><div class="track"><div class="fill" style="width:' + answered / n * 100 + '%"></div></div></div>' +
-      '<div class="card"><div class="muted">' + ask + '</div><div class="q' + (zhq ? ' zhq' : '') + '" lang="' + (zhq ? 'zh' : 'ja') + '">' + esc(it.q) + '</div>' +
-      '<div class="opts">' + it.o.map((o, j) => '<button type="button" class="opt' + (jpOpt ? ' jpo' : '') + (ans[qi] === j ? ' sel' : '') + '" data-opt="' + j + '"' + (jpOpt ? ' lang="ja"' : '') + '>' + esc(o) + '</button>').join('') + '</div></div>' +
+      '<div class="card">' + qBody(it, ans[qi]) + '</div>' +
       '<div class="bar two"><button class="btn" data-act="prev"' + (qi === 0 ? ' disabled' : '') + '>上一题</button>' +
       (qi < n - 1 ? '<button class="btn" data-act="next">下一题</button>' : '<button class="btn main" data-act="submit">交卷</button>') + '</div>' +
       '<div style="text-align:center"><button class="link" data-act="quit">先退出，等会儿再考</button>' + (answered === n && qi < n - 1 ? ' · <button class="link" data-act="submit">全部答完了，交卷</button>' : '') + '</div>';
@@ -223,10 +236,26 @@ const Stu = (() => {
     try { D = await rpc('stu_load'); } catch (e) { toast('成绩已经交上了，页面刷新没成功，等会儿再打开看看'); }
     resetQueue(); render();
   }
+  // 交卷后的错题解析：题目、正确答案、自己选的、为什么
+  function reviewHTML(r) {
+    const card = {}; (r.wrong || []).forEach(c => card[c.id] = c);
+    const rows = (r.review || []).length ? r.review : (r.wrong || []).map(c => ({ id: c.id }));
+    return '<div class="rvs">' + rows.map(x => {
+      const c = card[x.id] || {};
+      let h = '<div class="rv"><div class="rvh"><span class="nm" lang="ja">' + esc(c.w || '') + '</span><span class="muted" lang="ja">' + esc(c.r && c.r !== c.w ? c.r : '') + '</span><span class="sub">' + esc(c.m || '') + '</span></div>';
+      if (Array.isArray(x.o)) {
+        h += '<div class="small muted">' + (QT[x.t] || '') + '</div>' + (isJ(x.t) && x.t !== 'yoho' ? sentHTML(x.q, ' sm') : '<div class="rvq" lang="' + (x.t === 'cj' ? 'zh' : 'ja') + '">' + esc(x.q) + '</div>');
+        h += '<div class="rvo">' + x.o.map((o, j) => '<div' + (j === x.a ? ' class="ok"' : j === x.mine ? ' class="bad"' : '') + (jpOpt(x.t) ? ' lang="ja"' : '') + '><i>' + (j === x.a ? '✓' : j === x.mine ? '✗' : (j + 1)) + '</i>' + optHTML(x, o) + '</div>').join('') + '</div>';
+        if (x.mine < 0) h += '<div class="small muted">这题没有作答</div>';
+        if (x.why) h += '<div class="why">' + esc(x.why) + '</div>';
+      }
+      return h + '</div>';
+    }).join('') + '</div>';
+  }
   function resultModal(r) {
     const pct = Math.floor(r.score * 100 / r.total);
     modal('<h2>' + (r.passed ? '及格了！' : '这次没及格') + '</h2><div class="stats"><div class="stat"><b>' + r.score + ' / ' + r.total + '</b><span>答对</span></div><div class="stat"><b>' + pct + '%</b><span>正确率</span></div><div class="stat"><b>' + r.pass + '%</b><span>及格线</span></div></div>' +
-      (r.wrong.length ? '<div class="lab">答错的 ' + r.wrong.length + ' 个（已放进错词本）</div><div class="list">' + r.wrong.map(c => '<div class="it"><span><span class="nm" lang="ja">' + esc(c.w) + '</span> <span class="muted" lang="ja">' + esc(c.r) + '</span></span><span class="sub">' + esc(c.m) + '</span></div>').join('') + '</div>' : '<div class="muted">全部答对了。</div>') +
+      (r.wrong.length ? '<div class="lab">答错的 ' + r.wrong.length + ' 个（已放进错词本），下面是每道错题的解析</div>' + reviewHTML(r) : '<div class="muted">全部答对了。</div>') +
       '<button class="btn main" data-close>好的</button>');
   }
 
