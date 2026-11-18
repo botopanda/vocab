@@ -111,7 +111,9 @@ const Adm = (() => {
       '<label>备注（只有管理端看得到）<textarea id="em" rows="3" maxlength="500">' + esc(s.memo) + '</textarea></label>' +
       '<label><span><input type="checkbox" id="ea"' + (s.active ? ' checked' : '') + '> 在用（取消勾选 ＝ 停用，学生链接打不开，记录都保留）</span></label>' +
       '<div class="row"><button type="button" class="btn" data-close>取消</button><button class="btn main" id="esub">保存</button></div>' +
-      '<div class="muted">怀疑链接被别人拿到了：<button type="button" class="link" id="fresh">换一条新链接</button>（旧链接马上失效）</div></form>');
+      '<div class="muted">怀疑链接被别人拿到了：<button type="button" class="link" id="fresh">换一条新链接</button>（旧链接马上失效）</div>' +
+      '<div class="muted">不再需要这个学生（比如测试用的）：<button type="button" class="link danger" id="del">删除这个学生</button></div></form>');
+    m.querySelector('#del').addEventListener('click', () => deleteModal(sid));
     m.querySelector('#edf').addEventListener('submit', async e => {
       e.preventDefault(); const b = m.querySelector('#esub'); busy(b, true);
       try { await rpc('adm_student_edit', { sid, nm: m.querySelector('#en').value, mm: m.querySelector('#em').value, act: m.querySelector('#ea').checked, g: m.querySelector('#eg').value }); m.remove(); toast('已保存'); await reload(); }
@@ -123,6 +125,28 @@ const Adm = (() => {
       e.target.dataset.busy = '1'; e.target.disabled = true; e.target.textContent = '正在换……';
       try { const k = await rpc('adm_student_key', { sid, fresh: true }); m.remove(); await reload(); linkModal(sid, k); toast('已换新链接，旧的不能用了'); } catch (er) { fail(er); }
     });
+  }
+
+  // 删除学生：输入名字确认，删了不能恢复
+  function deleteModal(sid) {
+    const s = stuOf(sid); if (!s) return;
+    const m = modal('<h2>删除学生「' + esc(s.name) + '」</h2>' +
+      '<div class="warnbox">删除后，这个学生的<b>每周词单、学习进度、测验成绩、打卡记录和专属链接</b>都会一起删掉，<b>不能恢复</b>。<br>只是暂时不学的话，请用「停用」（记录都保留）。</div>' +
+      '<form class="form" id="delf"><label>确认删除，请输入这个学生的名字「' + esc(s.name) + '」<input id="dn" maxlength="30" autocomplete="off"></label>' +
+      '<div class="row"><button type="button" class="btn" data-close>不删了</button><button class="btn no" id="dsub" disabled>永久删除</button></div></form>');
+    const inp = m.querySelector('#dn'), b = m.querySelector('#dsub');
+    inp.addEventListener('input', () => { b.disabled = inp.value.trim() !== s.name; });
+    m.querySelector('#delf').addEventListener('submit', async e => {
+      e.preventDefault(); if (b.disabled || b.dataset.busy) return;
+      b.dataset.busy = '1'; busy(b, true); b.textContent = '正在删除……';
+      try {
+        await rpc('adm_student_delete', { sid, nm: inp.value.trim() });
+        document.querySelectorAll('.modal').forEach(x => x.remove());
+        if (stuKey === sid) { stuKey = null; draft = null; }
+        toast('已删除 ' + s.name); await reload();
+      } catch (er) { fail(er); delete b.dataset.busy; b.textContent = '永久删除'; b.disabled = inp.value.trim() !== s.name; }
+    });
+    setTimeout(() => inp.focus(), 50);
   }
 
   // ── 改动记录 ──

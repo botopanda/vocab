@@ -201,3 +201,5 @@ table.t th{color:var(--muted);font-weight:400;font-size:12px;border-top:0}
 .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);font-size:13px;padding:8px 14px;border-radius:8px;z-index:40;max-width:calc(100% - 32px)}
 @media (max-width:440px){.stat b{font-size:18px}.weeks{gap:2px}.wk{font-size:10px}}
 @media (prefers-reduced-motion:no-preference){.card{animation:fade .18s ease-out}@keyframes fade{from{opacity:.5}to{opacity:1}}}
+.link.danger{color:var(--bad)}
+.warnbox{background:var(--bad-bg);color:var(--ink);border-radius:10px;padding:10px 12px;line-height:1.7;margin-bottom:10px}.warnbox b{color:var(--bad)}
