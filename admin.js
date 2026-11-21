@@ -1,6 +1,7 @@
 // 单词学习系统 · 管理端：学生、设置面板（全局 → 方案 → 学生三层）、改动记录
 const Adm = (() => {
   let D = null, tab = 'stu', scope = 'global', tplKey = 'weak', stuKey = null, draft = null, savingCfg = false, copying = false;
+  let draftBase = null, draftVer = null, rebase = null, detailSeq = 0;   // 草稿开始编辑时的设置和版本号（两个窗口同时改时用来核对、合并）
   const NUM = { srsN: ['个', 0, 200, 5], weekly: ['个', 10, 500, 10], days: ['天', 1, 7, 1], addN: ['个', 5, 100, 5], learnW: ['周', 1, 12, 1], revW: ['周', 0, 4, 1], pass: ['%', 50, 100, 5],
     revN: ['个', 10, 500, 10], revPass: ['%', 50, 100, 5], qEvery: ['周', 4, 52, 1], qN: ['个', 10, 1000, 10], qPass: ['%', 50, 100, 5], yEvery: ['周', 12, 104, 1], yN: ['个', 10, 2000, 10], yPass: ['%', 50, 100, 5] };
   const LAB = { weekly: '每周新词数', days: '每周学几天', addOn: '再来一组', addN: '一组几个', mode: '学法', ratio: '各档比例', start: '从哪一档开始', only: '学哪几档',
@@ -19,8 +20,9 @@ const Adm = (() => {
   const CNT = () => LV.map(l => +(D.counts[l] || 0));
   const stuOf = id => D.students.find(s => s.id === id);
 
-  function start(d) { D = d; D.global = Object.assign({ srsOn: true, srsN: 20 }, D.global); $('app').dataset.role = 'adm'; if (!D.plans.some(p => p.key === tplKey)) tplKey = D.plans[0].key; render(); }
-  async function reload() { let ok = true; try { D = await rpc('adm_load'); D.global = Object.assign({ srsOn: true, srsN: 20 }, D.global); } catch (e) { ok = false; fail(e); } if (!D.plans.some(p => p.key === tplKey)) tplKey = D.plans[0].key; render(); return ok; }
+  function fix() { D.global = Object.assign({ srsOn: true, srsN: 20 }, D.global || {}); D.plans = D.plans || []; D.students = D.students || []; D.logs = D.logs || []; D.counts = D.counts || {}; if (!D.plans.some(p => p.key === tplKey)) tplKey = D.plans.length ? D.plans[0].key : null; }
+  function start(d) { D = d; fix(); $('app').dataset.role = 'adm'; render(); }
+  async function reload() { let ok = true; try { D = await rpc('adm_load', {}, { obj: true }); } catch (e) { ok = false; fail(e); } fix(); render(); return ok; }
 
   function render() {
     const tabs = [['stu', '学生'], ['cfg', '设置'], ['log', '改动记录']];
@@ -41,10 +43,11 @@ const Adm = (() => {
     if (!D.students.length) return h + '<div class="box"><h2>还没有学生</h2><div class="muted">点右上角「加学生」，加好后把专属链接发给学生，学生用手机打开就能学。</div></div>';
     h += '<div class="box"><div class="list">' + D.students.map(s => {
       const w = s.week, lt = s.last_test;
-      return '<div class="it clickable" data-stu="' + s.id + '"><div><div class="nm">' + esc(s.name) + (s.grp ? ' <span class="chip">' + esc(s.grp) + '</span>' : '') + (s.streak ? ' <span class="chip ok">连续 ' + s.streak + ' 天</span>' : '') + (s.active ? '' : ' <span class="chip bad">已停用</span>') + '</div>' +
-        '<div class="sub">' + esc(t[s.plan] || s.plan) + (Object.keys(s.ov || {}).length ? ' · 单独改了 ' + Object.keys(s.ov).length + ' 项' : '') + (s.next_cut != null ? ' · 下周只学 ' + s.next_cut + ' 个' : '') + '</div></div>' +
-        '<div class="sub" style="text-align:right">' + (w ? '第 ' + w.no + ' 周' + (w.kind === 'R' ? '（回顾）' : '') : md(s.start) + ' 开始') + ' · 学过 ' + s.learned + ' · 答对 ' + s.correct +
-        '<br>' + (lt ? '最近测验 ' + lt.score + '/' + lt.total + (lt.passed ? ' 及格' : lt.manual ? ' 放行' : ' 没及格') : '还没考过') + ' · ' + (s.last_seen ? '最后打开 ' + stamp(s.last_seen) : '还没打开过') + '</div></div>';
+      const wk = w ? '第 ' + num(w.no) + ' 周' + (w.kind === 'R' ? '（回顾）' : '') + (w.cur ? (w.kind === 'L' ? (num(w.n) ? ' · 本周练过 ' + num(w.done) + '/' + num(w.n) : ' · <span class="chip warn">这周没有词</span>') : '') : '（已到期，学生还没打开新的一周）') : md(s.start) + ' 开始';
+      return '<div class="it clickable" data-stu="' + esc(s.id) + '" role="button" tabindex="0"><div class="main"><div class="nm">' + esc(s.name) + (s.grp ? ' <span class="chip">' + esc(s.grp) + '</span>' : '') + (s.streak ? ' <span class="chip ok">连续 ' + num(s.streak) + ' 天</span>' : '') + (s.active ? '' : ' <span class="chip bad">已停用</span>') + '</div>' +
+        '<div class="sub">' + esc(t[s.plan] || s.plan) + (Object.keys(s.ov || {}).length ? ' · 单独改了 ' + Object.keys(s.ov).length + ' 项' : '') + (s.next_cut != null ? ' · 下周只学 ' + num(s.next_cut) + ' 个' : '') + '</div></div>' +
+        '<div class="sub side"><div>' + wk + ' · 累计学过 ' + num(s.learned) + ' · 全亮 ' + num(s.correct) + '</div>' +
+        '<div>' + (lt ? '最近测验 ' + num(lt.score) + '/' + num(lt.total) + (lt.passed ? ' 及格' : lt.manual ? ' 放行' : ' 没及格') : '还没考过') + ' · ' + (s.last_seen ? '最后打开 ' + stamp(s.last_seen) : '还没打开过') + '</div></div></div>';
     }).join('') + '</div></div>';
     return h;
   }
@@ -54,13 +57,15 @@ const Adm = (() => {
     const m = modal('<h2>加学生</h2><form class="form" id="addf"><label>名字（学生和你都看得到）<input id="an" maxlength="30" required></label>' +
       '<label>方案<select id="ap">' + D.plans.map(x => '<option value="' + esc(x.key) + '"' + (x.key === 'std' ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select></label>' +
       '<label>哪天开始（会算到那一周的星期一）<input id="ad" type="date" value="' + ds + '"></label>' +
+      '<div class="muted">开课日之前学生打开链接只会看到「还没开始」；第一周到开课那天才按当时的设置发词。</div>' +
       '<div class="row"><button type="button" class="btn" data-close>取消</button><button class="btn main" id="asub">加好，拿链接</button></div></form>');
     m.querySelector('#addf').addEventListener('submit', async e => {
       e.preventDefault();
       const b = m.querySelector('#asub'); busy(b, true);
       try {
-        const r = await rpc('adm_student_add', { nm: m.querySelector('#an').value, pl: m.querySelector('#ap').value, sd: m.querySelector('#ad').value || null });
-        m.remove(); await reload(); linkModal(r.id, r.key, true);
+        const r = await rpc('adm_student_add', { nm: m.querySelector('#an').value, pl: m.querySelector('#ap').value, sd: m.querySelector('#ad').value || null }, { obj: true });
+        if (!r.key) throw new Error('没有拿到链接，请在学生详情里点「专属链接」');
+        m.close(); await reload(); linkModal(r.id, r.key, true);
       } catch (err) { fail(err); busy(b, false); }
     });
     setTimeout(() => m.querySelector('#an').focus(), 50);
@@ -71,37 +76,54 @@ const Adm = (() => {
       '<div class="copyrow"><input readonly value="' + esc(url) + '" id="lk"><button class="gbtn" id="lkc">复制</button></div><button class="btn" data-close>好的</button>');
     m.querySelector('#lkc').addEventListener('click', () => copyText(url, m.querySelector('#lk')));
   }
+  // 学生详情：同一时间只开一个（连点、弱网时不会叠出好几层）
   async function detailModal(sid) {
     const s = stuOf(sid); if (!s) return;
-    let det; try { det = await rpc('adm_student_detail', { sid }); } catch (e) { fail(e); return; }
-    const t = TPL();
-    const m = modal('<div class="row"><h2>' + esc(s.name) + '</h2><button class="gbtn" data-close>关闭</button></div>' +
+    const seq = ++detailSeq;
+    document.querySelectorAll('.modal.det').forEach(x => x.close ? x.close() : x.remove());
+    let det; try { det = await rpc('adm_student_detail', { sid }, { obj: true }); } catch (e) { if (seq === detailSeq) fail(e); return; }
+    if (seq !== detailSeq || !stuOf(sid)) return;
+    const t = TPL(), KN = { week: '周测', review: '回顾测', quarter: '季度测', year: '年测' };
+    const weeks = Array.isArray(det.weeks) ? det.weeks : [], wrong = Array.isArray(det.wrong) ? det.wrong : [], cur = det.cur;
+    const extTxt = cur ? '延长第 ' + num(cur.no) + ' 周 1 周：结束日 ' + md(cur.end) + ' → ' + md(addDays(cur.end, 7)) + '（马上生效）' : (s.active ? '还没开始，不用延长' : '已停用');
+    const m = modal('<div class="row"><h2>' + esc(s.name) + ' <small class="muted">学生编号 ' + esc(String(sid).slice(0, 8)) + '</small></h2><button class="gbtn" data-close>关闭</button></div>' +
       '<div class="muted">' + esc(t[s.plan] || s.plan) + ' · ' + md(s.start) + ' 开始' + (s.memo ? ' · ' + esc(s.memo) : '') + '</div>' +
+      (cur ? '<div class="note">现在第 <b>' + num(cur.no) + '</b> 周' + (cur.kind === 'R' ? '（回顾周）' : '') + '：' + md(cur.start) + '～' + md(cur.end) + (cur.kind === 'L' ? ' · 本周练过 <b>' + num(cur.done) + ' / ' + num(cur.n) + '</b>' : '') + '</div>' : '') +
       '<div class="row" style="justify-content:flex-start"><button class="gbtn" data-d="link">专属链接</button><button class="gbtn" data-d="cfg">改这个学生的设置</button><button class="gbtn" data-d="edit">改名字/备注/停用</button></div>' +
       '<div class="lab">只对这个学生、马上生效</div>' +
-      '<div class="form"><div class="row"><span>延长这一周（这周到期不换周，多给 1 周）</span><button class="gbtn" data-d="extend">延长 1 周</button></div>' +
-      '<div class="row"><span>下周减量（只改下一周；0 ＝ 暂停新词）</span><span class="copyrow"><input id="cutv" type="number" min="0" max="500" value="' + (s.next_cut ?? 50) + '" style="width:80px"><button class="gbtn" data-d="cut">确定</button></span></div>' +
-      '<div class="row"><span>这一周最近交的那场算及格（原分数保留）；以前的某一场在下面表里点「放行」</span><button class="gbtn" data-d="pass">手动放行</button></div></div>' +
-      '<div class="lab">每一周</div><div class="scroll"><table class="t"><tr><th>周</th><th>开始</th><th>词数</th><th>测验</th></tr>' +
-      (det.weeks.length ? det.weeks.map(w => '<tr><td>第 ' + w.no + ' 周' + (w.kind === 'R' ? '（回顾）' : '') + (w.extended ? '（延长）' : '') + '</td><td>' + md(w.start) + '</td><td>' + (w.kind === 'L' ? '共 ' + w.n + ((w.carry || w.extra) ? '（' + [w.carry ? '错词 ' + w.carry : '', w.extra ? '追加 ' + w.extra : ''].filter(Boolean).join('、') + '）' : '') : (w.carry ? '错词 ' + w.carry : '—')) + '</td><td>' +
-        ((w.tests || []).length ? w.tests.map(x => ({ week: '周测', review: '回顾测', quarter: '季度测', year: '年测' }[x.kind] || '') + ' ' + (x.done ? x.score + '/' + x.total + ' ' + (x.passed ? '<span class="chip ok">及格</span>' : x.manual ? '<span class="chip">放行</span>' : '<span class="chip bad">没及格</span> <button class="link" data-tpass="' + esc(x.id) + '">放行</button>') : '考到一半')).join('<br>') : '没考') + '</td></tr>').join('') : '<tr><td colspan="4" class="muted">学生还没打开过链接</td></tr>') +
+      '<div class="form"><div class="row"><span>' + esc(extTxt) + '</span><button class="gbtn" data-d="extend"' + (cur ? '' : ' disabled') + '>延长 1 周</button></div>' +
+      (cur && cur.kind === 'L' && !num(cur.nnew) && !cur.tested ? '<div class="row"><span>' + (cur.check ? '<b>请核对：</b>旧记录分不清有没有给这个学生设过「下周暂停/减量」，这一周先没自动发词。确认要学的话，补发几个：' : '这一周没有新词（还没开考）。现在补发几个：') + '</span><span class="copyrow"><input id="refv" type="number" min="1" max="500" value="' + num(cur.weekly, 100) + '" style="width:80px" aria-label="补发几个新词"><button class="gbtn" data-d="refill">补发新词</button></span></div>' : '') +
+      '<div class="row"><span>设置下周新词数（只改下一周；0 ＝ 暂停新词）</span><span class="copyrow"><input id="cutv" type="number" min="0" max="500" value="' + num(s.next_cut ?? 50, 50) + '" style="width:80px" aria-label="下周新词数"><button class="gbtn" data-d="cut">设好</button></span></div>' +
+      '<div class="row"><span>把这一周最近交的那场记为及格（原分数保留）；以前的某一场在下面表里点「记为及格」</span><button class="gbtn" data-d="pass">手动放行</button></div></div>' +
+      '<div class="lab">每一周</div><div class="scroll"><table class="t"><tr><th>周</th><th>开始</th><th>词数</th><th>练过</th><th>测验</th></tr>' +
+      (weeks.length ? weeks.map(w => '<tr><td>第 ' + num(w.no) + ' 周' + (w.kind === 'R' ? '（回顾）' : '') + (w.extended ? '（延长）' : '') + '</td><td>' + md(w.start) + '</td><td>' + (w.kind === 'L' ? '共 ' + num(w.n) + ((w.carry || w.extra) ? '（' + [w.carry ? '错词 ' + num(w.carry) : '', w.extra ? '追加 ' + num(w.extra) : ''].filter(Boolean).join('、') + '）' : '') : (w.carry ? '错词 ' + num(w.carry) : '—')) + '</td><td>' + (w.kind === 'L' ? num(w.done) : '—') + '</td><td>' +
+        ((w.tests || []).length ? w.tests.map(x => (KN[x.kind] || '') + ' ' + (x.done ? num(x.score) + '/' + num(x.total) + ' ' + (x.passed ? '<span class="chip ok">及格</span>' : x.manual ? '<span class="chip">放行</span>' : '<span class="chip bad">没及格</span> <button class="link" data-tpass="' + esc(x.id) + '">记为及格</button>') : '考到一半')).join('<br>') : '没考') + '</td></tr>').join('') : '<tr><td colspan="5" class="muted">' + (s.active ? '还没有开始的周（开课日之前不生成）' : '没有记录') + '</td></tr>') +
       '</table></div>' +
-      '<div class="lab">错过的词（' + det.wrong.length + '）</div>' +
-      (det.wrong.length ? '<div class="list">' + det.wrong.slice(0, 60).map(x => '<div class="it"><span><span class="nm" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r) + '</span></span><span class="sub">' + esc(x.m) + ' · 错 ' + x.times + ' 次' + (x.st === 'correct' ? ' · 后来对了' : '') + '</span></div>').join('') + '</div>' : '<div class="muted">还没有。</div>'));
+      '<div class="lab">错过的词 ' + wrong.length + ' 个' + (wrong.length > 60 ? '，下面显示错得最多的 60 个' : '') + '</div>' +
+      (wrong.length ? '<div class="list">' + wrong.slice(0, 60).map(x => '<div class="it"><span><span class="nm" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r) + '</span></span><span class="sub">' + esc(x.m) + ' · 错 ' + num(x.times) + ' 次' + (x.st === 'correct' ? ' · 后来对了' : '') + (x.off ? ' · 已停用' : '') + '</span></div>').join('') + '</div>' : '<div class="muted">还没有。</div>'));
+    m.classList.add('det');
+    let acting = false;
     m.addEventListener('click', async e => {
       const tp = e.target.closest('[data-tpass]');
-      if (tp) { if (tp.disabled) return; tp.disabled = true; try { await rpc('adm_test_pass', { tid: tp.dataset.tpass }); toast('已放行（原分数保留）'); m.remove(); await reload(); detailModal(sid); } catch (er) { fail(er); tp.disabled = false; } return; }
-      const b = e.target.closest('[data-d]'); if (!b) return;
+      if (tp) { if (tp.disabled || acting) return; acting = true; tp.disabled = true; try { await rpc('adm_test_pass', { tid: tp.dataset.tpass }); toast('已记为及格（原分数保留）'); m.close(); await reload(); detailModal(sid); } catch (er) { fail(er); tp.disabled = false; } acting = false; return; }
+      const b = e.target.closest('[data-d]'); if (!b || b.disabled || acting) return;
       const d = b.dataset.d;
-      if (d === 'link') { try { const k = await rpc('adm_student_key', { sid, fresh: false }); m.remove(); linkModal(sid, k); } catch (er) { fail(er); } return; }
-      if (d === 'cfg') { m.remove(); tab = 'cfg'; scope = 'stu'; stuKey = sid; render(); return; }
-      if (d === 'edit') { m.remove(); editModal(sid); return; }
-      if (b.dataset.tpass) return;
-      let val = null;
+      if (d === 'link') { acting = true; try { const k = await rpc('adm_student_key', { sid, fresh: false }, { str: true }); m.close(); linkModal(sid, k); } catch (er) { fail(er); } acting = false; return; }
+      if (d === 'cfg') { m.close(); tab = 'cfg'; scope = 'stu'; stuKey = sid; draft = null; render(); return; }
+      if (d === 'edit') { m.close(); editModal(sid); return; }
+      let val = null, extra = {};
       if (d === 'cut') { const raw = m.querySelector('#cutv').value.trim(); val = Number(raw); if (raw === '' || !Number.isInteger(val) || val < 0 || val > 500) { toast('请填 0～500 之间的整数'); return; } }
-      busy(b, true);
-      try { await rpc('adm_student_action', { sid, act: d, val }); toast({ extend: '已延长 1 周', cut: val === 0 ? '已设好：下周暂停新词' : '已设好：下周只学 ' + val + ' 个', pass: '已放行' }[d]); m.remove(); await reload(); detailModal(sid); }
-      catch (er) { fail(er); busy(b, false); }
+      if (d === 'extend') { if (!cur) return; extra = { wk: cur.id, ext: num(cur.extended) }; }
+      if (d === 'refill') { if (!cur) return; const raw = m.querySelector('#refv').value.trim(); val = Number(raw); if (raw === '' || !Number.isInteger(val) || val < 1 || val > 500) { toast('请填 1～500 之间的整数'); return; } extra = { wk: cur.id }; }
+      acting = true; busy(b, true);
+      try {
+        const r = await rpc('adm_student_action', Object.assign({ sid, act: d, val }, extra));
+        toast({ extend: '已延长：第 ' + num(cur && cur.no) + ' 周到 ' + md(r && r.end ? r.end : '') + ' 结束', cut: val === 0 ? '已设好：下周暂停新词' : '已设好：下周只学 ' + val + ' 个', pass: '已放行', refill: '已补发 ' + num(r && r.added) + ' 个新词' }[d]);
+        m.close(); await reload(); detailModal(sid);
+      } catch (er) {
+        fail(er); acting = false; busy(b, false);
+        if ((d === 'extend' || d === 'refill') && /已经延长过|换到第|旧了|已经有新词|已经开考/.test(er.message)) { m.close(); await reload(); detailModal(sid); }
+      }
     });
   }
   function editModal(sid) {
@@ -111,19 +133,25 @@ const Adm = (() => {
       '<label>备注（只有管理端看得到）<textarea id="em" rows="3" maxlength="500">' + esc(s.memo) + '</textarea></label>' +
       '<label><span><input type="checkbox" id="ea"' + (s.active ? ' checked' : '') + '> 在用（取消勾选 ＝ 停用，学生链接打不开，记录都保留）</span></label>' +
       '<div class="row"><button type="button" class="btn" data-close>取消</button><button class="btn main" id="esub">保存</button></div>' +
-      '<div class="muted">怀疑链接被别人拿到了：<button type="button" class="link" id="fresh">换一条新链接</button>（旧链接马上失效）</div>' +
+      '<div class="muted">怀疑链接被别人拿到了：<button type="button" class="link" id="fresh">换一条新链接</button>（旧链接马上失效）<span id="freshFix" hidden> · 刚才没换成功（或不知道换没换）：<button type="button" class="link" id="nowKey">查看现在有效的链接</button></span></div>' +
       '<div class="muted">不再需要这个学生（比如测试用的）：<button type="button" class="link danger" id="del">删除这个学生</button></div></form>');
     m.querySelector('#del').addEventListener('click', () => deleteModal(sid));
     m.querySelector('#edf').addEventListener('submit', async e => {
       e.preventDefault(); const b = m.querySelector('#esub'); busy(b, true);
-      try { await rpc('adm_student_edit', { sid, nm: m.querySelector('#en').value, mm: m.querySelector('#em').value, act: m.querySelector('#ea').checked, g: m.querySelector('#eg').value }); m.remove(); toast('已保存'); await reload(); }
+      try { await rpc('adm_student_edit', { sid, nm: m.querySelector('#en').value, mm: m.querySelector('#em').value, act: m.querySelector('#ea').checked, g: m.querySelector('#eg').value }); m.close(); toast('已保存'); await reload(); }
       catch (er) { fail(er); busy(b, false); }
     });
     m.querySelector('#fresh').addEventListener('click', async e => {
-      if (e.target.dataset.busy) return;
-      if (!e.target.dataset.sure) { e.target.dataset.sure = '1'; e.target.textContent = '确定换？再点一次'; return; }
-      e.target.dataset.busy = '1'; e.target.disabled = true; e.target.textContent = '正在换……';
-      try { const k = await rpc('adm_student_key', { sid, fresh: true }); m.remove(); await reload(); linkModal(sid, k); toast('已换新链接，旧的不能用了'); } catch (er) { fail(er); }
+      const fb = e.target;
+      if (fb.dataset.busy) return;
+      if (!fb.dataset.sure) { fb.dataset.sure = '1'; fb.textContent = '确定换？再点一次'; return; }
+      fb.dataset.busy = '1'; fb.disabled = true; fb.textContent = '正在换……';
+      try { const k = await rpc('adm_student_key', { sid, fresh: true }, { str: true }); m.close(); await reload(); linkModal(sid, k); toast('已换新链接，旧的不能用了'); }
+      catch (er) { fail(er); delete fb.dataset.busy; delete fb.dataset.sure; fb.disabled = false; fb.textContent = '换一条新链接'; m.querySelector('#freshFix').hidden = false; }
+    });
+    m.querySelector('#nowKey').addEventListener('click', async e => {
+      if (e.target.disabled) return; e.target.disabled = true;
+      try { const k = await rpc('adm_student_key', { sid, fresh: false }, { str: true }); m.close(); linkModal(sid, k); } catch (er) { fail(er); e.target.disabled = false; }
     });
   }
 
@@ -177,6 +205,7 @@ const Adm = (() => {
   }
   function cfgHTML() {
     if (scope === 'stu' && !D.students.length) return '<div class="box"><h2>还没有学生</h2><div class="muted">先在「学生」里加学生。</div></div>';
+    if (scope === 'tpl' && !tplKey) return '<div class="box"><h2>还没有方案</h2><div class="muted">数据库里没有读到方案，请刷新页面；还是没有的话请联系管理员。</div></div>';
     const t = TPL(), CN = CNT();
     return '<section class="box"><h2>按现在的设置 <small id="sumWho"></small></h2><div class="stats">' +
       '<div class="stat"><b id="sDay"></b><span id="sDayLab">每天新词</span></div><div class="stat"><b id="sWords"></b><span>所选档位的词</span></div><div class="stat"><b id="sWeeks"></b><span id="sYears"></span></div></div>' +
@@ -188,8 +217,8 @@ const Adm = (() => {
       '<section class="box"><h2>各档怎么学 <small>' + LV.map((l, i) => l + ' ' + CN[i]).join(' · ') + '</small></h2>' +
       fld('mode', '学法', seg('c-mode', '学法', [['mix', '按比例混合'], ['step', '逐级'], ['only', '只学某几档']])) +
       '<div class="sub2" id="pMix"><span class="inh" id="i-ratio"></span><div id="lvRows" style="display:flex;flex-direction:column;gap:8px">' +
-      LV.map((l, i) => '<div class="lv"><b>' + l + '</b><div class="barr"><i id="bar' + i + '"></i></div><div class="step"><button type="button" data-r="' + i + '" data-dd="-1" aria-label="' + l + ' 减少">−</button><input id="r' + i + '" type="number" min="0" max="100" aria-label="' + l + ' 百分比"><button type="button" data-r="' + i + '" data-dd="1" aria-label="' + l + ' 增加">+</button></div><span class="n" id="rn' + i + '"></span></div>').join('') +
-      '</div><div class="sumline" id="ratioSum"><span id="ratioTxt"></span><button type="button" class="gbtn" id="ratioReset">恢复默认比例</button></div></div>' +
+      LV.map((l, i) => '<div class="lv"><b>' + l + '</b><div class="barr"><i id="bar' + i + '"></i></div><div class="step"><button type="button" data-r="' + i + '" data-dd="-1" aria-label="' + l + ' 减少">−</button><input id="r' + i + '" type="number" min="0" max="100" aria-label="' + l + ' 百分比"><span class="u">%</span><button type="button" data-r="' + i + '" data-dd="1" aria-label="' + l + ' 增加">+</button></div><span class="n" id="rn' + i + '"></span></div>').join('') +
+      '</div><div class="sumline" id="ratioSum"><span id="ratioTxt"></span><button type="button" class="gbtn" id="ratioReset">恢复系统初始比例（' + DEF_RATIO.join('/') + '）</button></div></div>' +
       '<div class="sub2" id="pStep">' + fld('start', '从哪一档开始', seg('c-start', '从哪一档开始', LV.map(l => [l, l]))) + '<div class="note" id="stepTxt"></div></div>' +
       '<div class="sub2" id="pOnly">' + fld('only', '学哪几档', '<div class="checks" id="c-only">' + LV.map((l, i) => '<button type="button" class="ck" data-v="' + l + '" aria-pressed="false">' + l + ' · ' + CN[i] + '</button>').join('') + '</div>') + '<div class="note" id="onlyTxt"></div></div></section>' +
       '<section class="box" id="bxSrs"><h2>每天复习 <small>按遗忘曲线：学过的词隔 1、2、4、7、15 天回来一次</small></h2>' + fld('srsOn', '要每天复习', sw('srsOn', '要每天复习')) + fld('srsN', '每天最多复习几个', stepHTML('srsN'), hint('到期的词比这个多时，按到期早的先复习，剩下的明天接着来')) + '</section>' +
@@ -207,7 +236,7 @@ const Adm = (() => {
       '<section class="box"><h2>几场测验撞在同一周</h2>' + fld('merge', '怎么考', seg('c-merge', '同一周几场测验', [['merge', '合成一场'], ['both', '分开考']])) + '</section>' +
       '<section class="box"><h2>拼图</h2>' + fld('dim', '回顾测答错时，格子变暗', sw('dim', '答错时格子变暗'), hint('关着＝不变暗，只记进错词本')) + '</section>';
   }
-  function saveBar() { return '<div class="savebar"><div class="wrap"><div class="st" id="dirty">没有改动</div><div style="display:flex;gap:8px"><button type="button" class="btn" id="discard" disabled>放弃本次编辑</button><button type="button" class="btn main" id="save" disabled>保存</button></div></div></div>'; }
+  function saveBar() { return '<div class="savebar"><div class="wrap"><div class="st" id="dirty" role="status">没有改动</div><div style="display:flex;gap:8px"><button type="button" class="btn" id="discard" disabled>放弃改动</button><button type="button" class="btn main" id="save" disabled>保存</button></div></div></div>'; }
   function buildSteps() {}
 
   // 三层数据
@@ -270,7 +299,28 @@ const Adm = (() => {
     $('who').innerHTML = '正在改：<b>' + esc(nm) + '</b>' + (scope === 'global' ? '（所有学生的起点）' : scope === 'tpl' ? '（用这个方案的学生，共 ' + D.students.filter(x => x.plan === tplKey).length + ' 人）' : '（只影响这一个学生）');
     $('sumWho').textContent = scope === 'stu' ? (s ? s.name : '') + ' 的情况' : scope === 'tpl' ? '用「' + t[tplKey] + '」的学生' : '所有学生的默认';
   }
-  function loadDraft() { if (scope === 'stu' && !stuOf(stuKey)) return; draft = clone(layer()); whoTxt(); syncInputs(); refresh(); }
+  // 这一层设置在数据库里的版本号（保存时带上，别人刚改过会被拦下）
+  function layerVer() { if (scope === 'global') return num(D.gver, 0); if (scope === 'tpl') return num((D.plans.find(p => p.key === tplKey) || {}).ver, 0); return num((stuOf(stuKey) || {}).ver, 0); }
+  const layerId = () => scope + ':' + (scope === 'tpl' ? tplKey : scope === 'stu' ? stuKey : '');
+  function loadDraft() {
+    if (scope === 'stu' && !stuOf(stuKey)) return;
+    if (scope === 'tpl' && !tplKey) return;
+    draft = clone(layer()); draftBase = clone(draft); draftVer = layerVer();
+    let note = '';
+    // 保存时发现别人刚改过：把自己的改动放到最新的设置上（只改了不同项的直接合并；同一项两边都改了的，列出来请老师看一眼）
+    if (rebase && rebase.id === layerId()) {
+      const { mine, base } = rebase, both = [];
+      const put = (dst, src, b, k) => { if (same(src[k], b[k])) return; if (!same(dst[k], b[k]) && !same(dst[k], src[k])) both.push(LAB[k] || k); if (src[k] === undefined) delete dst[k]; else dst[k] = clone(src[k]); };
+      if (scope === 'stu') {
+        if (mine.tpl !== base.tpl) { if (draft.tpl !== base.tpl && draft.tpl !== mine.tpl) both.push('方案'); draft.tpl = mine.tpl; }
+        new Set([...Object.keys(mine.ov), ...Object.keys(base.ov)]).forEach(k => put(draft.ov, mine.ov, base.ov, k));
+      } else new Set([...Object.keys(mine), ...Object.keys(base)]).forEach(k => put(draft, mine, base, k));
+      note = both.length ? '别人刚改过这一层；你的改动已经放到最新的设置上。下面几项两边都改了，现在显示的是你的：' + both.join('、') + '。看一眼再保存。' : '别人刚改过这一层的其他项；你的改动已经放到最新的设置上，可以再保存一次。';
+    }
+    rebase = null;
+    whoTxt(); syncInputs(); refresh();
+    if (note) { const w = $('who'); if (w) w.insertAdjacentHTML('beforeend', '<div class="warnbox" role="status">' + esc(note) + '</div>'); toast('别人刚改过这一层设置，请看页面上方的提示'); }
+  }
   function refresh() {
     if (!draft || !$('dirty')) return;
     const e = eff(), b = scope === 'global' ? null : base(), o = scope === 'global' ? null : ov();
@@ -289,18 +339,20 @@ const Adm = (() => {
     }
     $('pMix').hidden = e.mode !== 'mix'; $('pStep').hidden = e.mode !== 'step'; $('pOnly').hidden = e.mode !== 'only';
     const rs = e.ratio.reduce((a, c) => a + c, 0), per = alloc(e.weekly, e.ratio);
-    LV.forEach((l, i) => { $('bar' + i).style.width = Math.min(100, e.ratio[i]) + '%'; $('rn' + i).textContent = '每周 ' + per[i] + ' 个'; });
+    LV.forEach((l, i) => { $('bar' + i).style.width = Math.min(100, num(e.ratio[i])) + '%'; $('rn' + i).textContent = '约 ' + per[i] + ' 个/周'; });
     $('ratioTxt').textContent = '加起来 ' + rs + '%' + (rs === 100 ? '' : '，要正好 100% 才能保存') + (CNT().slice(1).every(x => !x) ? '。现在只有 N5 有词，其他档的名额先由 N5 补上' : '');
     $('ratioSum').classList.toggle('badsum', rs !== 100);
     const si = Math.max(0, LV.indexOf(e.start));
     $('stepTxt').innerHTML = '<b>' + esc(LV.slice(si).join(' → ')) + '</b>，学完一档自动升下一档；一档最后不够一周时，同一周用下一档补满。' + (si > 0 ? LV.slice(0, si).join('、') + ' 在拼图上直接点亮，标「已掌握」。' : '');
     const skip = LV.filter(l => !(e.only || []).includes(l));
     $('onlyTxt').innerHTML = '只学 <b>' + (esc((e.only || []).join('、')) || '（还没选）') + '</b>' + (skip.length ? '；' + esc(skip.join('、')) + ' 在拼图上直接点亮，标「已掌握」。' : '。');
-    const err = Math.max(1, Math.round(e.weekly * .17)), rate = Math.floor((e.weekly - err) / e.weekly * 100), passed = rate >= e.pass, carry = passed ? e.carryPass : e.carryFail;
-    let t = '例：' + e.weekly + ' 个错了 ' + err + ' 个（对了 ' + rate + '%，' + (passed ? '及格' : '没到 ' + e.pass + '%，不及格') + '），按「' + (passed ? '及格了但有错词' : '没及格时') + '」那一项：';
-    if (!carry) t += '错词不带，下周照常学 <b>' + e.weekly + '</b> 个新词。';
-    else if (e.total === 'A') t += '下周学 <b>' + (e.weekly + err) + '</b> 个（' + err + ' 个错词＋' + e.weekly + ' 个新词）。';
-    else { const k = Math.min(err, e.weekly); t += '下周还是 <b>' + e.weekly + '</b> 个（' + k + ' 个错词＋' + (e.weekly - k) + ' 个新词）。'; }
+    // 预览里的数字都先变成数字再显示（设置里万一混进了奇怪的内容，也不会被当成网页代码）
+    const wkN = Math.max(1, num(e.weekly, 100)), pa = num(e.pass, 95);
+    const err = Math.max(1, Math.round(wkN * .17)), rate = Math.floor((wkN - err) / wkN * 100), passed = rate >= pa, carry = passed ? e.carryPass : e.carryFail;
+    let t = '例：' + wkN + ' 个错了 ' + err + ' 个（对了 ' + rate + '%，' + (passed ? '及格' : '没到 ' + pa + '%，不及格') + '），按「' + (passed ? '及格了但有错词' : '没及格时') + '」那一项：';
+    if (!carry) t += '错词不带，下周照常学 <b>' + wkN + '</b> 个新词。';
+    else if (e.total === 'A') t += '下周学 <b>' + (wkN + err) + '</b> 个（' + err + ' 个错词＋' + wkN + ' 个新词）。';
+    else { const k = Math.min(err, wkN); t += '下周还是 <b>' + wkN + '</b> 个（' + k + ' 个错词＋' + (wkN - k) + ' 个新词）。'; }
     $('totalTxt').innerHTML = t;
     $('revOff').textContent = e.revW === 0 ? '现在没有回顾周，下面的设置不起作用' : '';
     lockBox('bxRev', e.revW === 0); lockBox('bxSrs', !e.srsOn, 'srsOn'); lockBox('bxQ', !e.qOn, 'qOn'); lockBox('bxY', !e.yOn, 'yOn');
@@ -312,9 +364,11 @@ const Adm = (() => {
     $('sWeeks').textContent = T + ' 周'; $('sYears').textContent = '约 ' + (T / 52).toFixed(1) + ' 年学完';
     let wk = ''; for (let w = 1; w <= 16; w++) { const s = P[w - 1]; wk += s ? '<div class="wk' + (s === 'R' ? ' r' : '') + '" title="第 ' + w + ' 周">' + (s === 'R' ? '回' : w) + '</div>' : '<div class="wk e" title="第 ' + w + ' 周：已学完"></div>'; }
     $('weeks').innerHTML = wk;
-    const ch = changes(), bad = (rs !== 100 && e.mode === 'mix') || (e.mode === 'only' && !(e.only || []).length);
-    $('dirty').innerHTML = ch.length ? '有 <b>' + ch.length + '</b> 处改动没保存' + (bad ? '（先把上面标红的改好）' : '') : '没有改动';
+    const ch = changes(), badR = rs !== 100 && e.mode === 'mix', badO = e.mode === 'only' && !(e.only || []).length, bad = badR || badO;
+    const why = badR ? '各档比例加起来 ' + rs + '%，' + (rs < 100 ? '还差 ' + (100 - rs) : '多了 ' + (rs - 100)) + '%' : badO ? '「学哪几档」还没选' : '';
+    $('dirty').innerHTML = ch.length ? '有 <b>' + ch.length + '</b> 处改动没保存' + (bad ? '（' + esc(why) + ' <button type="button" class="link" data-jump="' + (badR ? 'pMix' : 'pOnly') + '">去改</button>）' : '') : '没有改动';
     $('save').disabled = !ch.length || bad; $('discard').disabled = !ch.length;
+    $('discard').textContent = ch.length ? '放弃这 ' + ch.length + ' 处改动' : '放弃改动';
   }
   const dirtyCount = () => (tab === 'cfg' && draft && $('dirty')) ? changes().length : 0;
   function guard() { const n = dirtyCount(); if (n) { toast('先保存或放弃这 ' + n + ' 处改动，再切换'); return true; } return false; }
@@ -322,18 +376,29 @@ const Adm = (() => {
     const ch = changes(); if (!ch.length || savingCfg) return;
     savingCfg = true; busy(btn, true);
     const items = ch.map(([k, a, b]) => LAB[k] + '：' + a + ' → ' + b);
+    const ver = draftVer;
     try {
-      if (scope === 'global') await rpc('adm_save_cfg', { scope, target: '', d: draft, pl: null, items });
-      else if (scope === 'tpl') await rpc('adm_save_cfg', { scope, target: tplKey, d: draft, pl: null, items });
-      else await rpc('adm_save_cfg', { scope, target: stuKey, d: draft.ov, pl: draft.tpl, items });
+      if (scope === 'global') await rpc('adm_save_cfg', { scope, target: '', d: draft, pl: null, items, ver });
+      else if (scope === 'tpl') await rpc('adm_save_cfg', { scope, target: tplKey, d: draft, pl: null, items, ver });
+      else await rpc('adm_save_cfg', { scope, target: stuKey, d: draft.ov, pl: draft.tpl, items, ver });
       // 先把刚保存的设置写进本页，再重新读取；读取失败也不会拿旧设置盖回去
-      if (scope === 'global') D.global = Object.assign({}, D.global, clone(draft));
-      else if (scope === 'tpl') { const p = D.plans.find(x => x.key === tplKey); if (p) p.ov = clone(draft); }
-      else { const s = stuOf(stuKey); if (s) { s.ov = clone(draft.ov); s.plan = draft.tpl; } }
+      if (scope === 'global') { D.global = Object.assign({}, D.global, clone(draft)); D.gver = ver + 1; }
+      else if (scope === 'tpl') { const p = D.plans.find(x => x.key === tplKey); if (p) { p.ov = clone(draft); p.ver = ver + 1; } }
+      else { const s = stuOf(stuKey); if (s) { s.ov = clone(draft.ov); s.plan = draft.tpl; s.ver = ver + 1; } }
       draft = null; savingCfg = false;
-      toast('已保存：已经开始的这一周照旧，下一周起用新设置');
+      toast('已保存：已经开始的这一周照旧，各学生从下一周起用新设置');
       if (!(await reload())) toast('已保存，但重新读取没成功，刷新页面看看');
-    } catch (e) { savingCfg = false; fail(e); busy(btn, false); }
+    } catch (e) {
+      savingCfg = false;
+      if (/刚刚被/.test(e.message)) {
+        // 两个窗口同时改：重新读取最新的设置，把自己的改动放上去，请老师看一眼再保存（不会悄悄覆盖别人的）
+        let nd; try { nd = await rpc('adm_load', {}, { obj: true }); } catch (e2) { toast('别人刚改过这一层设置，重新读取又没成功；你的改动还在页面上，过一会儿再点保存'); busy(btn, false); return; }
+        rebase = { id: layerId(), mine: clone(draft), base: clone(draftBase) };
+        D = nd; fix(); render();
+        return;
+      }
+      fail(e); busy(btn, false);
+    }
   }
 
   document.addEventListener('click', async e => {
@@ -353,6 +418,7 @@ const Adm = (() => {
       m.querySelector('#rnf').addEventListener('submit', async ev => { ev.preventDefault(); try { await rpc('adm_plan_rename', { pk: tplKey, nm: m.querySelector('#rnn').value }); m.remove(); toast('已改名'); await reload(); } catch (er) { fail(er); } });
       return;
     }
+    const jp = t.closest('[data-jump]'); if (jp) { const el = $(jp.dataset.jump); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
     if (!draft) return;
     const sb = t.closest('button[data-k]'); if (sb) { const k = sb.dataset.k, [, mn, mx, sp] = NUM[k], v = Math.min(mx, Math.max(mn, eff()[k] + sp * (+sb.dataset.dd))); $('f-' + k).value = v; setVal(k, v); return; }
     const rr = t.closest('button[data-r]'); if (rr) { const i = +rr.dataset.r, r = eff().ratio.slice(); r[i] = Math.min(100, Math.max(0, r[i] + (+rr.dataset.dd))); $('r' + i).value = r[i]; setVal('ratio', r); return; }
@@ -382,6 +448,11 @@ const Adm = (() => {
       t.value = c; setVal(k, c); return;
     }
     if (/^r\d$/.test(t.id)) { const i = +t.id[1], r = eff().ratio.slice(), raw = t.value.trim(), v = Number(raw); if (raw === '' || !Number.isFinite(v)) { t.value = r[i]; return; } r[i] = Math.min(100, Math.max(0, Math.round(v))); t.value = r[i]; setVal('ratio', r); }
+  });
+  document.addEventListener('keydown', e => {
+    if (!D || $('app').dataset.role !== 'adm' || document.querySelector('.modal')) return;
+    const st = e.target.closest && e.target.closest('[data-stu]');
+    if (st && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); detailModal(st.dataset.stu); }
   });
   window.addEventListener('beforeunload', e => { if (dirtyCount()) { e.preventDefault(); e.returnValue = ''; } });
   return { start };
