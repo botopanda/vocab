@@ -3,7 +3,7 @@ const SB_URL = 'https://mycqrrkkltfmyfkbsupp.supabase.co';
 const SB_KEY = 'sb_publishable_Dhy_8XpoAWMkXwt5aOuwlQ_CfezzLjs';   // 公开用的大门钥匙，本来就放在网页里；数据靠钥匙链接＋门卫函数保护
 const KEY = new URLSearchParams(location.search).get('k') || '';
 const LV = ['N5', 'N4', 'N3', 'N2', 'N1'];
-const CV = 19;   // 网页版本：打开、开考时告诉数据库；旧网页会被提示刷新（数据库第 28 步起要 18：当场判对错；第 32 步起要 19：方案和申请）
+const CV = 19;   // 网页版本：打开、开考时告诉数据库，太旧的网页会被提示刷新。新版网页是 19（第 32 步起：方案和申请）；数据库（第 28 步起）只要 18 以上就收，第 32、33 步仍收 18，旧学生页不用强制刷新
 
 // 调数据库门卫函数。opt.obj：必须返回一个对象；opt.str：必须返回文字（空的、格式不对都当失败，不拿旧数据凑合）
 // opt.timeout：等这么多毫秒还没收到回复就不等了（当作网络断了：服务器可能做了，也可能没做）
