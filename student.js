@@ -12,6 +12,14 @@ const Stu = (() => {
   const WAIT = 15000;                                                  // 判一题最多等 15 秒；等不到当作回复丢了（不知道记没记下）
   const memAns = new Map();                                            // 答案在这个页面里也留一份（浏览器存不了时还能接着考）
   const memRes = new Map();                                            // 当场判过的结果在这个页面里留一份（回看、接着考时不用再取）
+  // 错词本页签上的数：服务器给的错词本＋这次打开后服务器确认「已经记进错词本」（判题回复 inbook）的词 → 确认的时间。
+  // 重新读取回来时用服务器的列表校准：列表里已经有的、或者在读取发出之前就确认的（服务器说不在本里）都去掉，只留读取发出后才确认的
+  const errNew = new Map();
+  let ebRef = null, ebIds = new Set();
+  const errN = () => {
+    if (D.errbook !== ebRef) { ebRef = D.errbook; ebIds = new Set((D.errbook || []).map(c => c.id)); }
+    let n = ebIds.size; for (const id of errNew.keys()) if (!ebIds.has(id)) n++; return n;
+  };
   const unsaved = new Map();                                           // 答案没能存进浏览器的试卷 → 属于哪一周（关页面前要提醒）
   let loadSeq = 0, loadOk = 0;                                         // 读取的请求编号：先发后到的旧回复不用
 
@@ -47,10 +55,13 @@ const Stu = (() => {
   // 读取一次：比后面发出的请求还晚回来的、比页面上已经显示的日期或周还旧的，都不用（返回 null）
   const behind = d => !!(D && D.week && d.week && (d.week.today < D.week.today || (d.week.today === D.week.today && d.week.no < D.week.no)));
   async function load() {
-    const my = ++loadSeq;
+    const my = ++loadSeq, sent = Date.now();
     const d = await rpc('stu_load', { cv: CV }, { obj: true });
     if (my < loadOk || behind(d)) return null;
-    loadOk = my; return d;
+    loadOk = my;
+    const ids = new Set((d.errbook || []).map(c => c.id));
+    for (const [id, at] of errNew) if (ids.has(id) || at < sent) errNew.delete(id);
+    return d;
   }
   // 重新读取；失败时保留现在的词单，页面上给一个「重新读取」
   async function reload(failMsg) {
@@ -80,12 +91,12 @@ const Stu = (() => {
     // 同一天：别的设备可能学过。词单没变就只更新每张卡的状态，正在学的这一轮顺序不打乱
     const ids = x => (x.cards || []).map(c => c.id).join();
     if (ids(d) !== ids(D) || mode === 'rev') {
-      if (T || (tab === 'study' && flipped)) { ['map', 'errbook', 'stats', 'class', 'history', 'tests'].forEach(k => D[k] = d[k]); lastSync = Date.now(); return; }
+      if (T || (tab === 'study' && flipped)) { ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'myplan', 'plans', 'req'].forEach(k => D[k] = d[k]); lastSync = Date.now(); return; }
       apply(d); resetQueue(); render(); return;
     }
     const by = Object.fromEntries(d.cards.map(c => [c.id, c]));
     cards().forEach(c => { const n = by[c.id]; if (n) Object.assign(c, { st: n.st, done: n.done, again: n.again, wrong: n.wrong }); });
-    ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'review', 'week'].forEach(k => D[k] = d[k]);
+    ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'review', 'week', 'myplan', 'plans', 'req'].forEach(k => D[k] = d[k]);
     lastSync = Date.now();
     // 从列表里点过来、排在最前面的那张卡（可能已经练过）留在最前面
     if (mode === 'new' && !flipped) { const need = todo().map(c => c.id), set = new Set(need), keep = pin && queue[0] === pin ? pin : null; queue = queue.filter(id => set.has(id) || id === keep).concat(need.filter(id => !queue.includes(id))); }
@@ -104,11 +115,11 @@ const Stu = (() => {
   window.addEventListener('focus', () => { if ($('app').dataset.role !== 'adm') checkFresh(); });
 
   function header() {
-    const w = D.week, L = w.kind === 'L', tot = cards().length, done = doneN();
+    const w = D.week, L = w.kind === 'L', tot = cards().length, done = doneN(), en = errN();
     const tabs = [['study', '学习'], ['test', '测验'], ['err', '错词本'], ['map', '进度']];
     return '<header class="top"><div class="wrap">' +
       '<div class="row"><div class="brand"><b>' + esc(D.me.name) + '</b><span>第 ' + w.no + ' 周 · ' + (L ? '学新词' : '回顾周') + ' · ' + md(w.start) + '～' + md(w.end) + (w.extended ? '（已延长）' : '') + '</span></div>' + (D.stats ? '<span class="chip' + (D.stats.streak ? ' ok' : '') + '">连续 ' + D.stats.streak + ' 天</span>' : '') + '</div>' +
-      '<div class="seg" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k) + '">' + n + (k === 'err' && D.errbook.length ? ' ' + D.errbook.length : '') + '</button>').join('') + '</div>' +
+      '<div class="seg" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k) + '">' + n + (k === 'err' && en ? ' ' + en : '') + '</button>').join('') + '</div>' +
       (L && tot && tab === 'study' && mode !== 'rev' && !w.waiting ? '<div class="prog"><span>本周练过 ' + done + ' / ' + tot + '</span><div class="track"><div class="fill" style="width:' + (done / tot * 100) + '%"></div></div></div>' : '') +
       '</div></header>';
   }
@@ -259,7 +270,7 @@ const Stu = (() => {
     if (parts.includes('year')) lines.push('年测：从这一年学过的词里抽题。');
     if (c.instant === true) {
       const wy = JN.filter(([t]) => (c.whyT || {})[t]).map(([, nm]) => nm);
-      lines.push('每题选了<b>马上告诉你对不对</b>，选了就不能改' + (wy.length ? '；' + wy.join('、') + '题还会显示解析' : '') + '。');
+      lines.push('每题选了<b>马上告诉你对不对</b>，选了就不能改' + (wy.length ? '；' + wy.join('、') + '题还会显示解析' : '') + '。答错的词马上放进错词本。');
       lines.push('开始后可以中途退出，回来点「接着考」：答过的题都记下了（换手机也在）。');
     } else lines.push(canStore ? '开始后可以中途退出，用<b>同一部手机、同一个浏览器</b>回来点「接着考」；交卷后不能再改。' : '<span class="bad">这个浏览器不能保存答案</span>：开始后请一次答完再离开，中途关掉页面答案会丢。');
     return lines.map(l => '<div>' + l + '</div>').join('');
@@ -368,7 +379,8 @@ const Stu = (() => {
     && r.mine >= 0 && r.mine < T.items[i].o.length && r.a >= 0 && r.a < T.items[i].o.length;
   const gone = e => /交过|过期|找不到这次测验/.test(e.message);
   const sure = e => !e.net && e.status >= 400 && e.status < 500;
-  const take = (i, r) => { res[i] = r; srv.add(i); ans[i] = r.mine; pend.delete(i); fetchBad.delete(i); save(); };
+  // 拿到服务器的结果（第一次判、重试、取回旧结果都走这里）：服务器说这题已经记进错词本（inbook），页签上的数就算上
+  const take = (i, r) => { res[i] = r; srv.add(i); ans[i] = r.mine; pend.delete(i); fetchBad.delete(i); save(); if (r.inbook === true && !errNew.has(T.items[i].id)) errNew.set(T.items[i].id, Date.now()); };
   function pick(j) {
     if (!T || submitting || checking) return;
     if (!instant) { ans[qi] = j; save(); render(); return; }
@@ -515,6 +527,55 @@ const Stu = (() => {
     ['learned', 100, '学过 100 个'], ['learned', 500, '学过 500 个'], ['learned', 1000, '学过 1000 个'], ['learned', 3000, '学过 3000 个'],
     ['correct', 100, '答对 100 个'], ['correct', 700, '答对 700 个'], ['passed', 1, '第一次及格'], ['passed', 10, '及格 10 次'],
   ];
+  // ── 我的学法：现在的方案、别的方案、申请换方案（老师审批） ──
+  function planHTML() {
+    const mp = D.myplan; if (!mp) return '';
+    const rq = D.req, pend = !!rq && rq.status === 'pending', others = (D.plans || []).filter(x => x.key !== mp.key);
+    let h = '<div class="box" id="myplan"><h2>我的学法</h2><div><b>' + esc(mp.name) + '</b>：' + esc(lvText(mp.lv, { weekly: num(mp.weekly) })) + '</div>' +
+      '<div class="small muted">下一张新生成的周词单起按这个（已经发的这一周照旧）。</div>';
+    const curP = (D.plans || []).find(x => x.key === mp.key);   // 老师单独调过、而且实际学法和方案本来的说法不一样时才提（逐级时单独的比例用不上，不提）
+    if (mp.own && (!curP || lvText(curP.lv) !== lvText(mp.lv))) h += '<div class="small muted">老师给你单独调过学法，以老师调的为准' + (curP ? '（方案「' + esc(mp.name) + '」本来是：' + esc(lvText(curP.lv)) + '）' : '') + '。</div>';
+    if (rq && pend) h += '<div class="note">已申请换成「<b>' + esc(rq.tname) + '</b>」，等老师审批。' + (rq.reason ? '理由：' + esc(rq.reason) : '') + ' <button type="button" class="gbtn" data-act="pcancel">撤回申请</button></div>';
+    else if (rq && rq.status === 'approved') h += '<div class="note pok">老师已同意，从下一张新的周词单起换成「<b>' + esc(rq.tname) + '</b>」。' + (rq.note ? '老师说：' + esc(rq.note) : '') + ' <button type="button" class="gbtn" data-act="pseen">知道了</button></div>';
+    else if (rq && rq.status === 'rejected') h += '<div class="note pno">老师没有同意换成「<b>' + esc(rq.tname) + '</b>」。' + (rq.note ? '老师说：' + esc(rq.note) : '') + ' <button type="button" class="gbtn" data-act="pseen">知道了</button></div>';
+    if (others.length) {
+      h += '<div class="lab muted">别的学法</div><div class="list">' + others.map(x => '<div class="it"><div class="main"><div class="nm">' + esc(x.name) + '</div><div class="sub">' + esc(lvText(x.mine || x.lv)) + '</div>' + ownNote(x) + '</div>' +
+        '<button type="button" class="gbtn" data-preq="' + esc(x.key) + '"' + (pend ? ' disabled' : '') + '>申请换成这个</button></div>').join('') + '</div>' +
+        '<div class="small muted">' + (pend ? '先撤回现在的申请，才能申请别的。' : '申请后由老师审批；同意了从下一张新的周词单起换，已经发的这一周照旧。') + '</div>';
+    }
+    return h + '</div>';
+  }
+  // 申请换方案：可以写一句理由（不写也行，最多 100 字）
+  function reqModal(pk) {
+    const x = (D.plans || []).find(y => y.key === pk); if (!x) return;
+    const m = modal('<h2>申请换成「' + esc(x.name) + '」</h2><div class="muted">换过去后：' + esc(lvText(x.mine || x.lv)) + '</div>' + ownNote(x) +
+      '<form class="form" id="rqf"><label>想换的理由（可以不写，最多 100 字）<textarea id="rqr" rows="3" maxlength="100"></textarea></label>' +
+      '<div class="row"><button type="button" class="btn" data-close>取消</button><button class="btn main" id="rqs">提交申请</button></div></form>');
+    m.querySelector('#rqf').addEventListener('submit', async e => {
+      e.preventDefault(); const b = m.querySelector('#rqs'); if (b.disabled) return; busy(b, true);
+      let r; try { r = await rpc('stu_plan_request', { act: 'apply', pk, reason: m.querySelector('#rqr').value.trim() }, { obj: true }); }
+      catch (er) { fail(er); busy(b, false); if (/已经有一个|现在用的方案|找不到这个方案/.test(er.message)) { m.close(); refreshSide('map'); } return; }
+      D.req = r.req || null; m.close(); toast('已申请，等老师审批'); if (tab === 'map') render();
+    });
+  }
+  // 撤回申请 / 关掉老师处理结果的提示：都带上页面上这一条的编号（不会撤回、关掉别的那条）。
+  // 这一条的状态已经变了（老师刚处理完、已经撤回过、上次回复丢了）：服务器什么都不改，按它说的现在的样子显示
+  async function planAct(btn, want) {
+    const rq = D.req; if (!rq) return;
+    busy(btn, true);
+    let r; try { r = await rpc('stu_plan_request', { act: want, rid: rq.id }, { obj: true }); }
+    catch (er) { fail(er); busy(btn, false); refreshSide('map'); return; }
+    const w = r.was || {};
+    if (r.act === 'cancelled' || (want === 'cancel' && w.status === 'cancelled')) toast('已撤回申请');
+    else if (want === 'cancel' && w.status === 'approved') toast('老师刚刚已经同意了：从下一张新的周词单起换成「' + w.tname + '」');
+    else if (want === 'cancel' && w.status === 'rejected') toast('老师刚刚已经处理了：没有同意' + (w.note ? '（' + w.note + '）' : ''));
+    D.req = r.req || null;
+    if (want === 'cancel' && w.status === 'approved') { refreshSide('map'); return; }   // 方案刚换了：重新读取一次
+    if (tab === 'map') render();
+  }
+  // 候选方案：上面写的是换过去后这个学生实际的学法（默认＋方案＋他自己单独的设置）；老师给他单独调过、和方案本来的说法不一样时，写明方案本来是什么
+  const ownNote = x => x.mine && lvText(x.mine) !== lvText(x.lv) ? '<div class="sub ownl">老师给你单独调过学法，上面是换过去后你实际的学法；这个方案本来是：' + esc(lvText(x.lv)) + '</div>' : '';
+
   function mapHTML() {
     const c = D.cfg, si = LV.indexOf(c.start), s = D.stats || { streak: 0, learned: 0, correct: 0, passed: 0, days: 0, last30: [] };
     const skipped = l => c.mode === 'only' ? !(c.only || []).includes(l) : c.mode === 'step' ? LV.indexOf(l) < si : false;
@@ -524,6 +585,7 @@ const Stu = (() => {
     let cal = ''; for (let i = 29; i >= 0; i--) { const k = addDays(D.week.today, -i), [, mm, dd] = k.split('-'); cal += '<i' + (on.has(k) ? ' class="f"' : '') + ' title="' + (+mm) + '月' + (+dd) + '日"></i>'; }
     h += '<div class="lab muted">最近 30 天（学过卡、复习过或考过试就亮）</div><div class="cal">' + cal + '</div>';
     h += '<div class="lab muted">成就</div><div class="badges">' + BADGES.map(([k, n, name]) => '<span class="badge' + ((k === 'streak' ? Math.max(num(s.streak), num(s.best)) : num(s[k])) >= n ? ' got' : '') + '">' + name + '</span>').join('') + '</div></div>';
+    h += planHTML();
     if ((D.class || []).length) {
       h += '<div class="box"><h2>' + esc(D.me.grp) + ' <small>同班同学，按名字排</small></h2><div class="list">' + D.class.map(m =>
         '<div class="it"><span class="nm">' + esc(m.name) + (m.me ? ' <span class="chip">我</span>' : '') + '</span><span class="sub">' + (m.today ? '<span class="chip ok">今天学了</span> ' : '') + '连续 ' + num(m.streak) + ' 天 · 本周练过 ' + num(m.week) + ' 个</span></div>').join('') + '</div></div>';
@@ -555,6 +617,7 @@ const Stu = (() => {
     const r = t.closest('[data-rate]'); if (r) { rate(r.dataset.rate); return; }
     const o = t.closest('[data-opt]'); if (o && T) { if (!o.disabled) pick(+o.dataset.opt); return; }
     const wc = t.closest('[data-wid]'); if (wc) { jumpTo(wc.dataset.wid); return; }
+    const pq = t.closest('[data-preq]'); if (pq) { if (!pq.disabled) reqModal(pq.dataset.preq); return; }
     const a = t.closest('[data-act]'); if (!a || a.disabled) return;
     const act = a.dataset.act;
     if (act === 'flip') flip();
@@ -564,6 +627,8 @@ const Stu = (() => {
     else if (act === 'list') { if (flipped || mode === 'rev') return; listView = true; render(); window.scrollTo({ top: 0 }); }
     else if (act === 'unlist') { listView = false; render(); window.scrollTo({ top: 0 }); }
     else if (act === 'refetch') { if (!T) return; fetchBad.delete(qi); render(); }
+    else if (act === 'pcancel') planAct(a, 'cancel');
+    else if (act === 'pseen') planAct(a, 'seen');
     else if (act === 'resync') { if (T && !checking && !submitting) submit(); }
     else if (act === 'retry') { if (T && instant && pend.has(qi) && !answering && !submitting) send(qi, pend.get(qi)); }
     else if (act === 'more') more(a);

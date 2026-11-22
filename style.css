@@ -251,3 +251,14 @@ table.t th{color:var(--muted);font-weight:400;font-size:12px;border-top:0}
 .vd.warn{color:var(--warn);background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:10px;padding:8px 10px;font-size:14px;line-height:1.7}
 .vd .gbtn{margin-left:4px}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+/* 第 32 步：设置页顶上一排（所有学生的默认｜各方案｜单个学生）、换方案的申请、学生「我的学法」 */
+.seg.scopes{max-width:100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;-webkit-overflow-scrolling:touch}   /* 方案多时横着滑，不占好几行 */
+.seg.scopes button{padding:6px 10px;flex:none;max-width:10em;overflow:hidden;text-overflow:ellipsis}                  /* 名字太长截短显示，悬停看全名 */
+.form select{width:100%;max-width:100%;text-overflow:ellipsis}
+.sub.ownl{color:var(--warn)}
+.rqbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;color:var(--ink);background:var(--warn-bg)}
+.rqbar .rqb{display:inline-flex;gap:6px}
+.note.pok{background:var(--ok-bg);color:var(--ink)}
+.note.pno{background:var(--bad-bg);color:var(--ink)}
+#myplan .list>.it>.gbtn{flex:none}
+#bxLv>.copyrow{margin-top:4px}

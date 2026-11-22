@@ -3,7 +3,7 @@ const SB_URL = 'https://mycqrrkkltfmyfkbsupp.supabase.co';
 const SB_KEY = 'sb_publishable_Dhy_8XpoAWMkXwt5aOuwlQ_CfezzLjs';   // 公开用的大门钥匙，本来就放在网页里；数据靠钥匙链接＋门卫函数保护
 const KEY = new URLSearchParams(location.search).get('k') || '';
 const LV = ['N5', 'N4', 'N3', 'N2', 'N1'];
-const CV = 18;   // 网页版本：打开、开考时告诉数据库；旧网页会被提示刷新（数据库第 28 步起要 18：当场判对错）
+const CV = 19;   // 网页版本：打开、开考时告诉数据库；旧网页会被提示刷新（数据库第 28 步起要 18：当场判对错；第 32 步起要 19：方案和申请）
 
 // 调数据库门卫函数。opt.obj：必须返回一个对象；opt.str：必须返回文字（空的、格式不对都当失败，不拿旧数据凑合）
 // opt.timeout：等这么多毫秒还没收到回复就不等了（当作网络断了：服务器可能做了，也可能没做）
@@ -46,6 +46,28 @@ const stamp = d => { const x = new Date(d), p = n => String(n).padStart(2, '0');
 const addDays = (d, n) => { const x = new Date(d + 'T00:00:00'); x.setDate(x.getDate() + n); const p = v => String(v).padStart(2, '0'); return x.getFullYear() + '-' + p(x.getMonth() + 1) + '-' + p(x.getDate()); };
 // 东京今天的日期（服务器按东京时间换日、换周）
 const tokyoToday = () => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); } catch (e) { return ''; } };
+
+// 一个方案「各档怎么学」的一句话（管理端、学生页都用）。lv = {mode, ratio, start, only}；
+// opt.short：只要一句短的（加学生的下拉里用）；opt.weekly：按比例时再写每周大约各几个
+function lvSplit(total, ratio) {
+  const s = ratio.reduce((a, b) => a + b, 0) || 1, raw = ratio.map(r => total * r / s), out = raw.map(Math.floor);
+  let left = total - out.reduce((a, b) => a + b, 0);
+  raw.map((x, i) => [x - Math.floor(x), i]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0 && ratio[i] > 0) { out[i]++; left--; } });
+  return out;
+}
+function lvText(lv, opt = {}) {
+  lv = lv || {};
+  const m = lv.mode || 'mix';
+  if (m === 'step') { const st = LV.includes(lv.start) ? lv.start : 'N5'; return '新词从 ' + st + ' 起按档发' + (opt.short ? '' : '，本档的新词发完了接着发下一档' + (st !== 'N5' ? '（' + LV.slice(0, LV.indexOf(st)).join('、') + ' 不用学）' : '')); }
+  if (m === 'only') { const o = LV.filter(l => (lv.only || []).includes(l)); return '新词只从 ' + (o.length ? o.join('、') : '（还没选）') + ' 选' + (opt.short ? '' : '，以前的错词仍会复习'); }
+  const r = Array.isArray(lv.ratio) && lv.ratio.length === 5 ? lv.ratio.map(x => Math.max(0, num(x))) : null;
+  const used = r ? LV.filter((l, i) => r[i] > 0) : LV;
+  let t = '按比例混合 ' + (used.length === 5 ? 'N5～N1' : used.join('、'));
+  if (opt.short || !r) return t;
+  t += '（' + LV.map((l, i) => r[i] ? l + ' ' + r[i] + '%' : '').filter(Boolean).join(' · ') + '）';
+  if (opt.weekly > 0) { const per = lvSplit(opt.weekly, r); t += '；按常规每周新词数 ' + opt.weekly + ' 个估算，大约 ' + LV.map((l, i) => per[i] ? l + ' ' + per[i] : '').filter(Boolean).join('、') + ' 个'; }
+  return t;
+}
 
 function toast(t) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => el.hidden = true, 3200); }
 function fail(e) { toast(e && e.message ? e.message : '没成功，请再试一次'); }
