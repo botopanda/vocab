@@ -223,3 +223,31 @@ table.t th{color:var(--muted);font-weight:400;font-size:12px;border-top:0}
 .modal table.t td,.modal table.t th{white-space:normal;padding:6px 5px}   /* 手机弹窗里五列都放得下 */
 .modal table.t td:first-child,.modal table.t th{white-space:nowrap}
 @media (max-width:440px){.lv{grid-template-columns:32px auto minmax(0,1fr)}.lv .barr{display:none}}
+/* 第 28 步（2026-11-22）：本周全部词、测验当场判对错 */
+.wkline{display:flex;align-items:center;justify-content:space-between;gap:6px 10px;flex-wrap:wrap}
+.wkline .muted{flex:1 1 200px;min-width:0}
+.wkline .gbtn{font-size:13px;padding:6px 10px}
+.lh{font-size:15px;font-weight:500;margin:0}
+.lh small{font-weight:400;font-size:12px;color:var(--muted)}
+.wl{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;margin-top:6px}
+.wc{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0;padding:9px 10px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);cursor:pointer;text-align:left}
+.wc b{font-family:var(--jp);font-weight:500;font-size:17px;line-height:1.35;max-width:100%;overflow-wrap:anywhere}
+.wc .tags{display:flex;flex-wrap:wrap;gap:4px}
+.wc .chip{font-size:11px;padding:0 6px;background:var(--bg);color:var(--muted)}
+.wc .chip.ok{background:var(--ok-bg);color:var(--ok)}
+.wc .chip.bad{background:var(--bad-bg);color:var(--bad)}
+.wc .chip.warn{background:var(--warn-bg);color:var(--warn)}
+.wc.ok{border-color:var(--ok-bg)}
+.wc.bad{border-color:var(--bad)}
+.opt:disabled{cursor:default;color:inherit}
+.opt.right{border-color:var(--ok);background:var(--ok-bg);color:var(--ok);font-weight:500}
+.opt.wrong{border-color:var(--bad);background:var(--bad-bg);color:var(--bad)}
+.opt.right .no,.opt.wrong .no{color:inherit;font-weight:700}
+.opts.judged .opt:not(.right):not(.wrong){opacity:.6}
+.vd{font-size:15px;font-weight:500}
+.vd.ok{color:var(--ok)}
+.vd.bad{color:var(--bad)}
+.vd.muted{font-weight:400;font-size:13px}
+.vd.warn{color:var(--warn);background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:10px;padding:8px 10px;font-size:14px;line-height:1.7}
+.vd .gbtn{margin-left:4px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}

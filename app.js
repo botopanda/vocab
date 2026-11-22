@@ -3,25 +3,32 @@ const SB_URL = 'https://mycqrrkkltfmyfkbsupp.supabase.co';
 const SB_KEY = 'sb_publishable_Dhy_8XpoAWMkXwt5aOuwlQ_CfezzLjs';   // 公开用的大门钥匙，本来就放在网页里；数据靠钥匙链接＋门卫函数保护
 const KEY = new URLSearchParams(location.search).get('k') || '';
 const LV = ['N5', 'N4', 'N3', 'N2', 'N1'];
-const CV = 17;   // 网页版本：打开、开考时告诉数据库；旧网页会被提示刷新（数据库第 17 步起）
+const CV = 18;   // 网页版本：打开、开考时告诉数据库；旧网页会被提示刷新（数据库第 28 步起要 18：当场判对错）
 
 // 调数据库门卫函数。opt.obj：必须返回一个对象；opt.str：必须返回文字（空的、格式不对都当失败，不拿旧数据凑合）
+// opt.timeout：等这么多毫秒还没收到回复就不等了（当作网络断了：服务器可能做了，也可能没做）
 async function rpc(fn, args = {}, opt = {}) {
-  let r;
+  let r, text = '';
+  const ac = opt.timeout && typeof AbortController === 'function' ? new AbortController() : null;
+  let late = false;
+  const tm = ac ? setTimeout(() => { late = true; ac.abort(); }, opt.timeout) : null;
+  const slow = () => { const er = new Error('网络太慢，等了 ' + Math.round(opt.timeout / 1000) + ' 秒没收到回复'); er.net = true; er.timeout = true; return er; };
   try {
-    r = await fetch(`${SB_URL}/rest/v1/rpc/${fn}`, {
-      method: 'POST',
-      headers: { apikey: SB_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ k: KEY, ...args }),
-    });
-  } catch (e) { const er = new Error('网络不太稳定，没连上，请稍后再试'); er.net = true; throw er; }
-  let text = '';
-  try { text = await r.text(); } catch (e) { const er = new Error('网络中断了，没收到回复，请稍后再试'); er.net = true; throw er; }
+    try {
+      r = await fetch(`${SB_URL}/rest/v1/rpc/${fn}`, {
+        method: 'POST',
+        headers: { apikey: SB_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ k: KEY, ...args }),
+        signal: ac ? ac.signal : undefined,
+      });
+    } catch (e) { if (late) throw slow(); const er = new Error('网络不太稳定，没连上，请稍后再试'); er.net = true; throw er; }
+    try { text = await r.text(); } catch (e) { if (late) throw slow(); const er = new Error('网络中断了，没收到回复，请稍后再试'); er.net = true; throw er; }
+  } finally { if (tm) clearTimeout(tm); }
   let j = null; try { j = text ? JSON.parse(text) : null; } catch (e) {}
   if (!r.ok) {
     let m = (j && j.message) || '网络出错了，请稍后再试';
     if (/^[\x00-\x7F]+$/.test(m)) m = '操作没成功，请刷新页面后再试（' + m + '）';
-    throw new Error(m);
+    const er = new Error(m); er.status = r.status; throw er;   // status：4xx＝服务器明确拒绝（没做）；5xx、网络断了＝不确定做没做
   }
   if (opt.obj && (!j || typeof j !== 'object' || Array.isArray(j))) throw new Error('没有读到内容，请刷新页面再试');
   if (opt.str && (typeof j !== 'string' || !j)) throw new Error('没有读到内容，请刷新页面再试');
