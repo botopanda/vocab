@@ -97,7 +97,118 @@ function cardBack(c, opt = {}) {
   if (c.rel && c.rel.length) h += '<div class="rel"><div class="lab">有同一个汉字的词</div><div class="relw">' + c.rel.map(x => '<span class="rw' + (x.me ? ' me' : '') + '" title="' + esc(x.m) + '"><b lang="ja">' + esc(x.w) + '</b><span lang="ja">' + esc(x.r) + '</span><i>' + esc(x.m) + '</i></span>').join('') + '</div><div class="small muted">深色的是你学过的</div></div>';
   (c.ex || []).forEach((e, j) => { h += '<div class="ex"><div class="jp" lang="ja">' + rb(e[0]) + '</div>' + sayBtn(aud(c.id, j + 1), '听例句 ' + (j + 1)) + '<div class="zh">' + esc(e[1]) + '</div></div>'; });
   if (c.tip) h += '<div class="tip"><div class="lab">小提示</div><div>' + rb(c.tip) + '</div></div>';
+  if (!opt.noEx) h += exBlock(c.id);   // 拓展例句（点了才生成）
   return h;
+}
+
+// ── 拓展例句（卡片背面：知识例句、时事例句）──
+// 学生点了才取：先给缓存里没看过的，没有就现场生成（走云函数 ex-gen，最多等约 60 秒）。只显示，不评分、不打卡、不写学习记录。
+// EX.st：卡号 → {view 现在看哪一类, know/news: {sent, msg} 两类各存各的（迟到的结果不会盖掉另一类）}；EX.seq：卡号 → 最后一次点的序号（决定显示哪一类）
+// EX.seen：「卡号|类别」→ 看过的句子编号（刚显示的放最后）；EX.rid：结果不明（超时、断网、服务器出错、还在生成）时留着的请求编号，再点时接着取原结果
+// EX.kinds：学生页读取时服务器给的「哪几类开着」（{on, know, news}；旧服务器没有就是 null＝两类都显示）；EX.hide：这次读取以后服务器说「关掉了」的类别；
+// EX.kg：类别 → 作废代数（这一类关掉时加一：所有卡片上这一类之前发出、晚回来的结果都不写）；EX.offMsg：类别 → 关掉时的提示
+const EX = { st: new Map(), seen: new Map(), busy: new Set(), rid: new Map(), seq: new Map(), kinds: null, hide: new Set(), kg: { know: 0, news: 0 }, offMsg: {} };
+const exKinds = () => ['know', 'news'].filter(k => (!EX.kinds || EX.kinds[k]) && !EX.hide.has(k));
+// 开关状态变了（学生页读取、同一天的局部重读、服务器说关掉了）：对所有卡片同步——关掉的那一类作废迟到的结果、不再显示旧句和「换一句」；开着的那一类照常
+function exSync(before) {
+  const now = exKinds();
+  for (const k of ['know', 'news']) if (before.includes(k) && !now.includes(k)) {
+    EX.kg[k]++;
+    for (const key of [...EX.rid.keys()]) if (key.endsWith('|' + k)) EX.rid.delete(key);
+  }
+  document.querySelectorAll('.xex[id^="ex-"]').forEach(el => exPaint(el.id.slice(3)));
+}
+function exSetKinds(kinds) { const before = exKinds(); EX.kinds = kinds || null; EX.hide.clear(); EX.offMsg = {}; exSync(before); }
+function exOff(kinds, msg) { const before = exKinds(); kinds.forEach(k => { EX.hide.add(k); EX.offMsg[k] = msg; }); exSync(before); }
+const uuid4 = () => { try { if (crypto.randomUUID) return crypto.randomUUID(); } catch (e) {} const b = crypto.getRandomValues(new Uint8Array(16)); b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128; const h = [...b].map(x => x.toString(16).padStart(2, '0')).join(''); return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20); };
+async function exCall(body, timeout = 60000) {
+  const ac = typeof AbortController === 'function' ? new AbortController() : null;
+  let late = false; const tm = ac ? setTimeout(() => { late = true; ac.abort(); }, timeout) : null;
+  try {
+    const r = await fetch(SB_URL + '/functions/v1/ex-gen', { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SB_KEY }, body: JSON.stringify(body), signal: ac ? ac.signal : undefined });
+    let j = null; try { j = await r.json(); } catch (e) { j = null; }
+    if (!r.ok || !j || typeof j !== 'object') { const er = new Error((j && j.msg) || '没成功，请再试一次'); er.status = r.status; throw er; }
+    return j;
+  } catch (e) {
+    if (late) { const er = new Error('等了太久'); er.timeout = true; throw er; }
+    if (e && e.status) throw e;
+    const er = new Error('网络不太稳定，请再试一次'); er.net = true; throw er;
+  } finally { if (tm) clearTimeout(tm); }
+}
+const EX_MSG = { failed: '这次没生成好，请再点一次', running: '还在生成，过一会儿再点一次', wait: '这个词正在生成，过一会儿再点一次', unknown: '没找到这次的结果，请再点一次', off: '老师暂时关掉了拓展例句', gone: '这句已经不能看了，请再点一次' };
+// 这几种结果说明这次请求编号还没有确定的结局（可能还在生成、可能已经花了钱）：留着编号，再点时取原结果，不重新生成
+const EX_UNSURE = new Set(['running', 'unknown']);
+function exSent(x, wid) {
+  const src = x.kind === 'news' && x.url && /^https:\/\//.test(x.url)
+    ? ' · <a href="' + esc(x.url) + '" target="_blank" rel="noreferrer noopener">' + esc(x.site || '来源') + (x.date ? ' · ' + esc(md(x.date)) : '') + '</a>' : '';
+  return '<div class="xs"><div class="jp" lang="ja">' + rb(x.jp) + '</div><div class="zh">' + esc(x.zh) + '</div>' +
+    (x.kind === 'news' && x.title ? '<div class="xt">' + esc(x.title) + '</div>' : '') +
+    '<div class="xact"><span class="xtag">' + (x.kind === 'news' ? '时事' : '知识' + (x.sub ? ' · ' + esc(x.sub) : '')) + src + '</span>' +
+    '<span class="xbtn2"><button type="button" class="gbtn" data-exk="' + esc(x.kind) + '" data-wid="' + esc(wid) + '">换一句</button>' +
+    (x.test ? '' : '<button type="button" class="link" data-exrep="' + esc(x.id) + '">报错</button>') + '</span></div></div>';
+}
+function exInner(wid) {
+  const ks = exKinds(), s = EX.st.get(wid) || {}, busy = k => EX.busy.has(wid + '|' + k), v = s.view, on = !!v && ks.includes(v), cur = on ? (s[v] || {}) : {};
+  const btn = (k, n) => '<button type="button" class="gbtn' + (v === k ? ' on' : '') + '" data-exk="' + k + '" data-wid="' + esc(wid) + '"' + (busy(k) ? ' disabled' : '') + '>' + n + '</button>';
+  let h = '<div class="lab">拓展例句 <small>点了才生成，不算学习记录</small></div><div class="xbtns">' + ks.map(k => btn(k, k === 'know' ? '知识例句' : '时事例句')).join('') + '</div>';
+  if (on && busy(v)) h += '<div class="xwait">正在生成…（最多等一分钟）</div>';
+  else if (on && cur.sent) h += exSent(cur.sent, wid);   // 关掉的那一类：不显示旧句、也没有「换一句」
+  const msg = !v ? '' : on ? (busy(v) ? '' : cur.msg) : (EX.offMsg[v] || '');
+  if (msg) h += '<div class="xmsg">' + esc(msg) + '</div>';
+  return h;
+}
+// 两类都关着（总开关关了、或两类都设成关闭）时不显示拓展例句这一块（这张卡正在看的那一类刚收到「关掉了」提示的除外）
+const exBlock = wid => { const s = EX.st.get(wid); return exKinds().length || (s && s.view && EX.offMsg[s.view]) ? '<div class="xex" id="ex-' + esc(wid) + '">' + exInner(wid) + '</div>' : ''; };
+function exPaint(wid) { const el = document.getElementById('ex-' + wid); if (el) el.innerHTML = exInner(wid); }
+// 点「知识例句」「时事例句」（这一类还没有句子时）或「换一句」（again）：先给没看过的缓存，没有就生成；够数以后从「刚显示的那句」往下循环（A→B→A→B）。
+// 两类结果各存各的；迟到的结果只在它还是最后一次点的那一类时才切过去显示
+async function exGen(wid, kind, k = KEY, again = false) {
+  if (!exKinds().includes(kind)) { exPaint(wid); return; }   // 这一类已经关掉了（页面上残留的按钮）：不请求、不读本机缓存
+  const key = wid + '|' + kind;
+  const my = (EX.seq.get(wid) || 0) + 1; EX.seq.set(wid, my);
+  const st0 = EX.st.get(wid) || {}; st0.view = kind; EX.st.set(wid, st0);
+  if (EX.busy.has(key) || (!again && st0[kind] && st0[kind].sent)) { exPaint(wid); return; }   // 正在取，或这一类已经有一句：只切过去看
+  EX.busy.add(key); exPaint(wid);
+  const kg = EX.kg[kind];
+  const seen = EX.seen.get(key) || [], rid = EX.rid.get(key) || uuid4(), old = st0[kind] || {}, cur = old.sent ? old.sent.id : null;
+  const body = () => Object.assign({ act: 'gen', k, wid, kind, rid, seen }, cur ? { cur } : {});
+  let r = null, msg = '', unsure = false;
+  try {
+    r = await exCall(body());
+    for (let i = 0; i < 10 && r && (r.state === 'wait' || r.state === 'running'); i++) {
+      await new Promise(ok => setTimeout(ok, 3000));
+      r = await exCall(r.state === 'wait' ? body() : { act: 'poll', k, rid });
+    }
+    unsure = !!r && EX_UNSURE.has(r.state);
+  } catch (e) {
+    unsure = !!(e.timeout || e.net || !e.status || e.status >= 500);   // 结果不明：留着编号
+    msg = e.timeout ? '等了太久，可能还在生成，过一会儿再点一次' : e.message;
+  }
+  EX.busy.delete(key);
+  if (EX.kg[kind] !== kg) { exPaint(wid); return r; }   // 等待期间这一类被关掉了：这个晚回来的结果作废（不写句子、不写看过）
+  if (r && r.state === 'off') {   // 服务器说关掉了（带 kind＝只关这一类；不带＝总开关关了）：这张卡记下提示，所有卡片同步
+    EX.rid.delete(key); EX.seen.delete(key);
+    const s3 = EX.st.get(wid) || {}; s3[kind] = { sent: null, msg: r.msg || EX_MSG.off }; if (EX.seq.get(wid) === my) s3.view = kind; EX.st.set(wid, s3);
+    exOff(r.kind ? [r.kind] : ['know', 'news'], r.msg || EX_MSG.off);
+    return r;
+  }
+  if (unsure) EX.rid.set(key, rid); else EX.rid.delete(key);
+  const st = EX.st.get(wid) || {}, res = { sent: old.sent, msg: '' };
+  if (r && r.sent) { res.sent = r.sent; res.msg = r.msg || ''; EX.seen.set(key, seen.filter(x => x !== r.sent.id).concat(r.sent.id).slice(-30)); }
+  else { res.msg = r ? (r.msg || EX_MSG[r.state] || '没成功，请再点一次') : msg; if (r && r.state === 'gone') res.sent = null; }   // 这句已经不能看了：清掉
+  st[kind] = res;
+  if (EX.seq.get(wid) === my) st.view = kind;
+  EX.st.set(wid, st); exPaint(wid);
+  return r;
+}
+function exReport(sid) {
+  const m = modal('<h2>这句例句有问题</h2><form class="form" id="xrf"><label>哪里不对？（可以不写，最多 100 字）<textarea id="xrr" maxlength="100" rows="3"></textarea></label>' +
+    '<div class="row"><button type="button" class="btn" data-close>取消</button><button class="btn main" id="xrs">报给老师</button></div></form>');
+  m.querySelector('#xrf').addEventListener('submit', async ev => {
+    ev.preventDefault(); const b = m.querySelector('#xrs'); if (b.disabled) return; b.disabled = true;
+    try { await rpc('stu_ex_report', { sid, reason: m.querySelector('#xrr').value }, { obj: true }); m.close(); toast('已经报给老师了，谢谢'); }
+    catch (e) { b.disabled = false; fail(e); }
+  });
 }
 
 // 弹窗：Esc 或点外面关闭（sticky 时不能点外面关），关了以后焦点回到原来的按钮

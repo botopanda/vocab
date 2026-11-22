@@ -5,14 +5,19 @@ const Adm = (() => {
   let typing = false;                 // 这一页画出来以后老师在设置里输入过（数字框打字时还没离开、草稿还没更新，也算正在改）
   let draftBase = null, draftVer = null, rebase = null, detailSeq = 0, deciding = false;   // 草稿开始编辑时的设置和版本号（两个窗口同时改时用来核对、合并）
   const NUM = { srsN: ['个', 0, 200, 5], weekly: ['个', 10, 500, 10], days: ['天', 1, 7, 1], addN: ['个', 5, 100, 5], learnW: ['周', 1, 12, 1], revW: ['周', 0, 4, 1], pass: ['%', 50, 100, 5],
-    revN: ['个', 10, 500, 10], revPass: ['%', 50, 100, 5], qEvery: ['周', 4, 52, 1], qN: ['个', 10, 1000, 10], qPass: ['%', 50, 100, 5], yEvery: ['周', 12, 104, 1], yN: ['个', 10, 2000, 10], yPass: ['%', 50, 100, 5] };
+    revN: ['个', 10, 500, 10], revPass: ['%', 50, 100, 5], qEvery: ['周', 4, 52, 1], qN: ['个', 10, 1000, 10], qPass: ['%', 50, 100, 5], yEvery: ['周', 12, 104, 1], yN: ['个', 10, 2000, 10], yPass: ['%', 50, 100, 5],
+    exPerWord: ['句', 1, 20, 1], exPerDay: ['次', 0, 5000, 10], exPerMin: ['次', 1, 60, 1], exInflight: ['个', 1, 50, 1], exNewsDays: ['天', 1, 365, 1], exNewsWin: ['天', 7, 365, 1], exNoMatchDays: ['天', 1, 60, 1] };
   const LAB = { weekly: '每周新词数', days: '每周学几天', addOn: '再来一组', addN: '一组几个', mode: '学法', ratio: '各档比例', start: '从哪一档开始', only: '学哪几档',
     srsOn: '每天复习', srsN: '每天最多复习', learnW: '先学几周', revW: '回顾几周', untaught: '还没学的词', pass: '周测及格线', types: '周测题型', carryFail: '没及格带错词', carryPass: '及格也带错词', total: '下周学多少',
     revN: '回顾周抽多少', revMust: '错词一定抽到', revPass: '回顾周及格线', qOn: '季度测', qEvery: '季度测间隔', qN: '季度测抽多少', qPass: '季度测及格线',
     yOn: '年测', yEvery: '年测间隔', yN: '年测抽多少', yPass: '年测及格线', merge: '同周测验', dim: '答错变暗', tplOf: '方案',
-    order: '本周词单顺序', instant: '答题时当场判对错', whyT: '当场显示解析的题型' };
-  const SW = ['srsOn', 'addOn', 'carryFail', 'carryPass', 'revMust', 'qOn', 'yOn', 'dim', 'instant'];
-  const SEGS = [['mode', 'c-mode'], ['total', 'c-total'], ['start', 'c-start'], ['untaught', 'c-untaught'], ['merge', 'c-merge'], ['order', 'c-order']];
+    order: '本周词单顺序', instant: '答题时当场判对错', whyT: '当场显示解析的题型',
+    exOn: '拓展例句', exWhoK: '知识例句用哪家', exWhoN: '时事例句用哪家', exModelA: 'Claude 模型', exModelO: 'OpenAI 模型', exPerWord: '每个词每类最多几句',
+    exPerDay: '每人每天最多生成几次', exPerMin: '每人每分钟最多生成几次', exInflight: '全站同时生成几个', exNewsDays: '时事句多久换新', exNewsWin: '只用多少天内的新闻',
+    exNoMatchDays: '找不到新闻后隔几天再搜', exDomains: '新闻只搜哪些网站' };
+  const WHO = { anthropic: '只用 Claude', openai: '只用 OpenAI', both: '两家轮流', off: '关闭' };
+  const SW = ['srsOn', 'addOn', 'carryFail', 'carryPass', 'revMust', 'qOn', 'yOn', 'dim', 'instant', 'exOn'];
+  const SEGS = [['mode', 'c-mode'], ['total', 'c-total'], ['start', 'c-start'], ['untaught', 'c-untaught'], ['merge', 'c-merge'], ['order', 'c-order'], ['exWhoK', 'c-exWhoK'], ['exWhoN', 'c-exWhoN']];
   const MODE = { mix: '按比例混合', step: '逐级', only: '只学某几档' };
   const DEF_RATIO = [9, 8, 27, 22, 34];
   // 测验题型：前 5 种是 JLPT 题型（题库里的题），没写过的默认开；后 3 种简单题没写过的默认关
@@ -59,12 +64,13 @@ const Adm = (() => {
 
   function render() {
     typing = false;
-    const tabs = [['stu', '学生'], ['cfg', '设置'], ['log', '改动记录']];
+    const tabs = [['stu', '学生'], ['cfg', '设置'], ['ex', '拓展例句'], ['log', '改动记录']];
     let h = '<header class="top"><div class="wrap wide"><div class="row"><div class="brand"><b>单词系统 · 管理</b><span>' + esc(D.me) + '</span></div>' +
       '<div class="seg" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-atab="' + k + '" aria-pressed="' + (tab === k) + '">' + n + '</button>').join('') + '</div></div>' +
       (tab === 'cfg' ? scopeBar() : '') + '</div></header>';
     if (tab === 'stu') h += '<main class="wrap wide">' + stuHTML() + '</main>';
     else if (tab === 'log') h += '<main class="wrap wide">' + logHTML() + '</main>';
+    else if (tab === 'ex') h += '<main class="wrap wide">' + exaHTML() + '</main>';
     else h += '<main class="wrap">' + (copied ? copyWarn() : '') + cfgHTML() + '</main>' + saveBar();
     $('app').innerHTML = h;
     if (tab === 'cfg') {
@@ -272,6 +278,140 @@ const Adm = (() => {
     }).join('') + '</div></div>';
   }
 
+  // ── 拓展例句页：本期两家用量和预算、在途预留、学生报错、隐藏的句子、试生成、价格、最近调用 ──
+  let EXA = null, exaBusy = false;
+  const exT = { q: '', cands: [], wid: null, w: '', kind: 'know', prov: 'anthropic', res: null, busy: false, rid: null, ridFor: '' }, exR = { off: 0, list: null };
+  const STEPN = { know: '知识', search: '搜证', card: '制卡', check: '核对' };
+  const CALLN = { ok: '成功', waste: '废稿', unknown: '待对账（结果不明，先按预留额记）', error: '出错（记零）', pending: '进行中', pending_settle: '待对账（没记上，先按预留额记）' };
+  // 试生成「结果不明」的判断（提示和保留请求编号都用这一个）：断网、超时、服务器出错、还在生成，或者明细里有待对账的调用
+  const exUnsure = r => !!r && (!!r.unsure || r.state === 'running' || r.state === 'unknown' || (r.calls || []).some(c => c.status === 'unknown' || c.status === 'pending' || c.status === 'pending_settle'));
+  const exSig = () => exT.wid + '|' + exT.kind + '|' + exT.prov;
+  const PSTATE = { unset: '没填日期，不能生成', notstart: '本期还没开始', expired: '本期已结束', zero: '本期用完了', paused: '已暂停' };
+  const money = v => '$' + num(v).toFixed(num(v) < 1 && num(v) > 0 ? 4 : 2);
+  const PN = p => p === 'openai' ? 'OpenAI' : 'Claude';
+  async function exaLoad() {
+    if (exaBusy) return; exaBusy = true;
+    try { EXA = await rpc('adm_ex', { act: 'load', a: {} }, { obj: true }); exR.off = 0; exR.list = null; } catch (e) { fail(e); EXA = EXA || { err: e.message }; }
+    exaBusy = false; if (tab === 'ex') render();
+  }
+  function exaSent(x) {
+    return '<div class="xs"><div class="jp" lang="ja">' + rb(x.jp) + '</div><div class="zh">' + esc(x.zh) + '</div><div class="xtag">' + (x.kind === 'news' ? '时事' +
+      (x.url && /^https:\/\//.test(x.url) ? ' · <a href="' + esc(x.url) + '" target="_blank" rel="noreferrer noopener">' + esc(x.site || '来源') + (x.date ? ' · ' + esc(md(x.date)) : '') + '</a>' : '') + (x.title ? ' · ' + esc(x.title) : '')
+      : '知识' + (x.sub ? ' · ' + esc(x.sub) : '')) + '</div></div>';
+  }
+  function exaHTML() {
+    if (!EXA) { setTimeout(exaLoad, 0); return '<div class="box">正在读取……</div>'; }
+    if (EXA.err) return '<div class="box"><h2>没读到</h2><div class="muted">' + esc(EXA.err) + '</div><button class="gbtn" data-xa="reload">重新读取</button></div>';
+    const P = EXA.periods || [], C = EXA.counts || {}, K = EXA.calls || {};
+    let h = '<div class="note">金额是本站按「用量×价格」的估算，<b>实际以两家的账单页为准</b>；结果不明的调用按预留额记（显示「待对账」的，之后补上实际用量）。两家账单页请关掉自动充值。</div>';
+    const KW = EXA.who || {}, kchip = (n, k) => n + '：' + (KW[k] === 'off' ? '<span class="chip bad">关闭</span>' : '<span class="chip ok">' + esc(WHO[KW[k]] || KW[k] || '') + '</span>');
+    h += '<div class="box"><b>学生生成：' + (EXA.on ? '<span class="chip ok">开着</span>' : '<span class="chip bad">关着</span>') + '</b> · ' + kchip('知识例句', 'know') + ' · ' + kchip('时事例句', 'news') +
+      ' <div class="muted small">' + (EXA.on ? '' : '学生点了只会看到「暂时关掉了」；') + '关着的那一类学生页不显示按钮；下面「试生成」不受这些开关限制。在「设置 → 所有学生的默认 → 拓展例句」里改。</div></div>';
+    h += '<div class="exu">' + P.map(p => '<section class="box"><h2>' + PN(p.provider) + (p.state !== 'ok' ? ' <span class="chip bad">' + esc(PSTATE[p.state] || p.state) + '</span>' : '') + '</h2>' +
+      '<div class="stats"><div class="stat"><b>' + money(p.spent) + '</b><span>本期已花（估算）</span></div><div class="stat"><b>' + money(p.amount) + '</b><span>本期金额</span></div><div class="stat"><b>' + money(p.left) + '</b><span>还能用</span></div></div>' +
+      '<div class="muted small">' + (p.start ? '本期 ' + esc(md(p.start)) + '～' + esc(md(p.end)) : '本期还没填日期') + ' · 正在生成的预留 ' + money(p.pending) + '</div>' +
+      (p.paused ? '<div class="warnbox">暂停原因：' + esc(p.why) + ' <button type="button" class="gbtn" data-xa="resume" data-p="' + esc(p.provider) + '">恢复</button></div>' : '') +
+      '<form class="form xbud" data-p="' + esc(p.provider) + '"><label>本期金额（美元）<input name="amount" type="number" min="0" max="10000" step="0.01" value="' + num(p.amount) + '"></label>' +
+      '<div class="row"><label>开始日期<input name="start" type="date" value="' + esc(p.start || '') + '"></label><label>结束日期<input name="end" type="date" value="' + esc(p.end || '') + '"></label></div>' +
+      '<div class="muted small">金额填这一家账上<b>现在实际能用的余额</b>（留一点余量）；结束日期填余额或赠额的到期日。开始、结束都要填，不填＝这一家不能生成；过了结束日就停，请再填下一期。</div><button class="btn">保存 ' + PN(p.provider) + ' 的预算</button></form></section>').join('') + '</div>';
+    h += '<section class="box"><h2>句子和调用</h2><div class="stats"><div class="stat"><b>' + num(C.know) + '</b><span>知识例句</span></div><div class="stat"><b>' + num(C.news) + '</b><span>时事例句（在期）</span></div>' +
+      '<div class="stat"><b>' + num(C.hidden) + '</b><span>隐藏的</span></div></div><div class="muted small">过期的时事句 ' + num(C.old) + ' · 试生成 ' + num(C.test) + ' · 本月调用 ' + num(K.n) + ' 次（废稿 ' + num(K.waste) + '、结果不明 ' + num(K.unknown) + '、其中待对账 ' + num(K.swept) + '、正在进行 ' + num(K.pending) + '）</div></section>';
+    const R = exR.list || EXA.reports || [], NR = num(EXA.nreports);
+    const pager = NR > 20 ? '<div class="row" style="justify-content:flex-start;gap:8px"><button type="button" class="gbtn" data-xa="rpage" data-off="' + Math.max(0, exR.off - 20) + '"' + (exR.off > 0 ? '' : ' disabled') + '>上一页</button>' +
+      '<span class="muted small">第 ' + (exR.off + 1) + '～' + Math.min(NR, exR.off + 20) + ' 条（共 ' + NR + ' 条）</span><button type="button" class="gbtn" data-xa="rpage" data-off="' + (exR.off + 20) + '"' + (exR.off + 20 < NR ? '' : ' disabled') + '>下一页</button></div>' : '';
+    h += '<section class="box exl"><h2>学生报错 <small>' + NR + ' 条没处理</small></h2>' + pager + (R.length ? R.map(r => '<div class="it">' + exaSent(r.sent) +
+      '<div class="muted small">词「' + esc(r.sent.w) + '」 · 理由：' + esc(r.reason || '（没写）') + ' · ' + esc(r.who) + ' · ' + stamp(r.at) + ' · 这句一共被报 ' + num(r.sent.reports) + ' 次</div>' +
+      '<div class="row" style="justify-content:flex-start;gap:8px"><button type="button" class="gbtn" data-xa="hide" data-id="' + esc(r.sent.id) + '">隐藏这句</button><button type="button" class="gbtn" data-xa="ok" data-id="' + esc(r.id) + '">没问题</button></div></div>').join('') : '<div class="muted">没有。</div>') + pager + '</section>';
+    const HD = EXA.hidden || [];
+    if (HD.length) h += '<section class="box exl"><h2>隐藏的句子 <small>最近 30 条</small></h2>' + HD.map(x => '<div class="it">' + exaSent(x) + '<div class="row" style="justify-content:flex-start"><span class="muted small">词「' + esc(x.w) + '」</span><button type="button" class="gbtn" data-xa="show" data-id="' + esc(x.id) + '">恢复</button></div></div>').join('') + '</section>';
+    // 试生成
+    const sg = (id, cur, opts) => '<div class="seg" role="group" id="' + id + '">' + opts.map(([v, n]) => '<button type="button" data-v="' + v + '" aria-pressed="' + (cur === v) + '">' + n + '</button>').join('') + '</div>';
+    const held = !!exT.rid && exT.ridFor === exSig();   // 上一次结果不明：按钮只按原编号查询
+    h += '<section class="box" id="xtry"><h2>试生成 <small>真实调用（算进预算，标记为测试，不给学生看）：知识一次通常一笔；时事一次通常有搜证、制卡、核对三笔</small></h2>' +
+      '<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><button type="button" class="gbtn" data-xa="ping"' + (exT.pinging ? ' disabled' : '') + '>检查云函数</button>' +
+      (exT.ping ? '<span class="chip ' + (exT.ping.ok ? 'ok' : 'bad') + '" style="white-space:normal">' + esc(exT.ping.text) + '</span>' : '<span class="muted small">验收第一步：云函数能启动、数据库连得上、两把钥匙填了（不调用两家、不花钱）</span>') + '</div>' +
+      '<div class="muted small">上线验收：只验收准备启用的那几条（哪家＋哪一类）。每条至少一次「生成成功」并对上账本；时事是「搜过但暂无」时这条分支算通过，但要换个词再试，直到做出一张时事卡。</div>' +
+      '<div class="row" style="justify-content:flex-start;gap:8px"><input id="xtq" placeholder="词的写法或编号，例如 月" maxlength="20" value="' + esc(exT.q) + '" style="max-width:220px"><button type="button" class="gbtn" data-xa="find">找词</button></div>' +
+      (exT.cands.length ? '<div class="checks">' + exT.cands.map(c => '<button type="button" class="ck" data-xa="pick" data-id="' + esc(c.id) + '" data-w="' + esc(c.w) + '" aria-pressed="' + (exT.wid === c.id) + '">' + esc(c.lvl + ' ' + c.w + '（' + c.r + '）' + c.m) + '</button>').join('') + '</div>' : '') +
+      '<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">' + sg('xtk', exT.kind, [['know', '知识例句'], ['news', '时事例句']]) + sg('xtp', exT.prov, [['anthropic', 'Claude'], ['openai', 'OpenAI']]) +
+      '<button type="button" class="btn main" data-xa="try"' + (exT.wid && !exT.busy ? '' : ' disabled') + '>' + (exT.busy ? (exT.mode === 'query' ? '正在查询…' : '正在生成…') : (held ? '查询上次结果（不再调用）' : '试生成' + (exT.w ? '「' + esc(exT.w) + '」' : ''))) + '</button>' +
+      (held && !exT.busy ? '<button type="button" class="gbtn" data-xa="regen">重新生成（会再花一次钱）</button>' : '') + '</div>';
+    if (exT.res) {
+      const r = exT.res, cs = r.calls || [];
+      const authq = cs.some(c => c.status === 'error' && /钥匙|权限|额度用完|消费上限|拒绝了请求|没有填/.test(c.err || ''));
+      const unsure = exUnsure(r);
+      const verdict = r.state === 'unknown' ? ['bad', '未找到上次请求：目前未找到该编号，可以按原编号再查；点「重新生成」会提交新请求，可能另行计费'] : r.state === 'done' ? ['ok', '生成成功'] : r.state === 'none' ? ['ok', '搜过但暂无（这次搜过了，没有合适的新闻，不算出错）'] : authq ? ['bad', '鉴权或额度失败（这一家已暂停，看上面的暂停原因）']
+        : !cs.length && r.state ? ['bad', '没有调用：' + (r.msg || r.state)] : ['bad', '没生成好' + (r.msg ? '：' + r.msg : '')];
+      h += '<div class="row" style="justify-content:flex-start;gap:8px;margin:8px 0"><b>结论：</b><span class="chip ' + verdict[0] + '" style="white-space:normal">' + esc(verdict[1]) + '</span></div>' +
+        (unsure ? '<div class="warnbox">这次有结果不明或「待对账」的调用：先按预留额记着，可能已经花了钱。按钮已经换成「查询上次结果」，只按原来的请求编号查（不再调用两家）；确认要再试一次才点「重新生成」。过几分钟再到两家账单页对一下。</div>' : '') +
+        (r.sent ? exaSent(r.sent) : '') +
+        (cs.length ? '<div class="extw"><table class="extbl"><tr><th>哪家</th><th>模型</th><th>步骤</th><th>结果</th><th>输入</th><th>输出</th><th>搜索</th><th>花费</th></tr>' +
+          cs.map(c => '<tr><td>' + PN(c.provider) + '</td><td>' + esc(c.model) + '</td><td>' + esc(STEPN[c.step] || c.step) + '</td><td>' + esc(CALLN[c.status] || c.status) + (c.err ? '（' + esc(c.err) + '）' : '') + '</td><td>' + num(c.in) + '</td><td>' + num(c.out) + '</td><td>' + num(c.searches) + '</td><td>' + money(c.cost) + '</td></tr>').join('') +
+          '</table></div><div class="muted small">这次一共 ' + money(cs.reduce((a, c) => a + num(c.cost), 0)) + '</div>' : '');
+    }
+    h += '</section>';
+    // 价格
+    const PR = EXA.prices || [];
+    h += '<section class="box"><h2>价格 <small>每百万 token、每千次搜索（美元）；按「哪家＋模型＋生效日期」，用当天以前最新的一行</small></h2><div class="extw"><table class="extbl"><tr><th>哪家</th><th>模型</th><th>生效</th><th>输入</th><th>缓存读</th><th>缓存写</th><th>输出</th><th>搜索</th></tr>' +
+      PR.map(x => '<tr><td>' + PN(x.provider) + '</td><td>' + esc(x.model) + '</td><td>' + esc(x.eff_date) + '</td><td>' + num(x.in_per_m) + '</td><td>' + num(x.cached_per_m) + '</td><td>' + num(x.cwrite_per_m) + '</td><td>' + num(x.out_per_m) + '</td><td>' + num(x.search_per_k) + '</td></tr>').join('') + '</table></div>' +
+      '<div class="muted small">正在生成的调用用的那一版价格不能改；要改价就填一个新的生效日期。输入、输出要大于 0。</div>' +
+      '<form class="form" id="xpf"><div class="row" style="flex-wrap:wrap;gap:8px"><label>哪家<select name="provider"><option value="openai">OpenAI</option><option value="anthropic">Claude</option></select></label><label>模型<input name="model" maxlength="64" required></label><label>生效日期<input name="eff" type="date"></label></div>' +
+      '<div class="row" style="flex-wrap:wrap;gap:8px"><label>输入<input name="in" type="number" step="0.01" min="0" required></label><label>缓存读<input name="cached" type="number" step="0.01" min="0" required></label><label>缓存写<input name="cwrite" type="number" step="0.01" min="0" required></label><label>输出<input name="out" type="number" step="0.01" min="0" required></label><label>每千次搜索<input name="search" type="number" step="0.01" min="0" required></label></div><button class="btn">保存这一行价格</button></form></section>';
+    const RC = EXA.recent || [];
+    if (RC.length) h += '<section class="box"><h2>最近 20 次调用</h2><div class="extw"><table class="extbl"><tr><th>时间</th><th>哪家</th><th>步骤</th><th>结果</th><th>花费</th><th>预留</th><th></th></tr>' +
+      RC.map(c => '<tr><td>' + stamp(c.at) + '</td><td>' + PN(c.provider) + '</td><td>' + esc(STEPN[c.step] || c.step) + '</td><td>' + esc(c.swept ? '待对账（先按预留额记）' : CALLN[c.status] || c.status) + '</td><td>' + money(c.cost) + '</td><td>' + money(c.reserved) + '</td><td>' + (c.test ? '测试' : '') + (c.err ? ' ' + esc(c.err) : '') + '</td></tr>').join('') + '</table></div></section>';
+    return h;
+  }
+  async function exaAct(a) {
+    const act = a.dataset.xa;
+    if (act === 'reload') { EXA = null; render(); return; }
+    if (act === 'find') { exT.q = ($('xtq') || {}).value || ''; try { exT.cands = await rpc('adm_ex', { act: 'find', a: { q: exT.q.trim() } }); if (!exT.cands.length) toast('没找到这个词'); } catch (e) { fail(e); } render(); return; }
+    if (act === 'pick') { exT.wid = a.dataset.id; exT.w = a.dataset.w; exT.res = null; render(); return; }
+    if (act === 'rpage') { try { const r = await rpc('adm_ex', { act: 'reports', a: { offset: num(a.dataset.off) } }, { obj: true }); exR.off = num(a.dataset.off); exR.list = r.reports || []; EXA.nreports = r.nreports; } catch (e) { fail(e); } render(); return; }
+    if (act === 'ping') {
+      exT.pinging = true; render();
+      try {
+        const r = await exCall({ act: 'ping', k: KEY, rid: uuid4() }, 20000);
+        // 必验：云函数启动、Claude SDK 加载、数据库连通；钥匙两家分别显示，只要求准备启用的那家（看「知识例句／时事例句用哪家」）填了
+        const ks = r.keys || {}, need = Array.isArray(r.need) ? r.need : [];
+        const keyText = pv => PN(pv) + ' 钥匙：' + (ks[pv] ? '已填' : '没填') + (need.includes(pv) ? (ks[pv] ? '' : '（要用，必须填）') : '（没启用，可以不填）');
+        const ok = r.state === 'ok' && !!r.sdk && !!r.db && need.every(pv => ks[pv]);
+        exT.ping = { ok, text: '云函数正常启动 · ' + (r.sdk ? 'SDK 已加载' : 'Claude SDK 没加载好') + ' · ' + (r.db ? '数据库连上了' : '数据库没连上') + ' · ' + keyText('openai') + ' · ' + keyText('anthropic') };
+      } catch (e) { exT.ping = { ok: false, text: '云函数没回话：' + (e.status ? '出错 ' + e.status + '（' + e.message + '）' : e.message) + '。到 Supabase 的 ex-gen → Logs 看一下' }; }
+      exT.pinging = false; render(); return;
+    }
+    if (act === 'try' || act === 'regen') {
+      if (!exT.wid || exT.busy) return;
+      // 上一次结果不明：「试生成」按钮只按原编号查询（同一个词、同一类、同一家），返回那次的调用明细，不重新花钱；「重新生成」才换新编号
+      // 查询只发 poll（服务器上没有这次请求就回「未找到」，绝不新生成）；只有「试生成」（没有留着的编号时）和「重新生成」才发 gen
+      const sig = exSig(), query = act === 'try' && !!exT.rid && exT.ridFor === sig, rid = query ? exT.rid : uuid4();
+      exT.busy = true; exT.mode = query ? 'query' : 'gen'; exT.res = null; render();
+      try { exT.res = await exCall(query ? { act: 'poll', k: KEY, rid } : { act: 'gen', k: KEY, wid: exT.wid, kind: exT.kind, rid, seen: [], prov: exT.prov }, 70000); }
+      catch (e) { exT.res = { msg: e.timeout ? '等了太久，可能还在生成' : e.message, unsure: !!(e.timeout || e.net || !e.status || e.status >= 500) }; }
+      if (exUnsure(exT.res)) { exT.rid = rid; exT.ridFor = sig; } else { exT.rid = null; exT.ridFor = ''; }
+      exT.busy = false; await exaLoad(); return;
+    }
+    busy(a, true);
+    try {
+      if (act === 'resume') { await rpc('adm_ex', { act: 'resume', a: { provider: a.dataset.p } }, { obj: true }); toast('已恢复 ' + PN(a.dataset.p)); }
+      else if (act === 'hide' || act === 'show') { const r = await rpc('adm_ex', { act, a: { id: a.dataset.id } }, { obj: true }); toast(act === 'hide' ? '已隐藏，学生不会再看到这句' : r.expired ? '已恢复（这句时事已经过期，学生也不会再看到）' : '已恢复'); }
+      else if (act === 'ok') { await rpc('adm_ex', { act: 'ok', a: { id: a.dataset.id } }, { obj: true }); toast('已标记没问题'); }
+    } catch (e) { fail(e); busy(a, false); return; }
+    await exaLoad();
+  }
+  document.addEventListener('submit', async e => {
+    if (!D || $('app').dataset.role !== 'adm' || tab !== 'ex') return;
+    const f = e.target; if (!f.matches || !f.matches('.xbud, #xpf')) return;
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(f).entries()), btn = f.querySelector('button');
+    if (btn && btn.disabled) return; busy(btn, true);
+    try {
+      if (f.id === 'xpf') { await rpc('adm_ex', { act: 'price', a: fd }, { obj: true }); toast('已保存这一行价格'); }
+      else { const r = await rpc('adm_ex', { act: 'budget', a: Object.assign({ provider: f.dataset.p }, fd) }, { obj: true }); toast('已保存：' + PN(f.dataset.p) + ' 本期 ' + money(r.amount) + '（' + md(r.start) + '～' + md(r.end) + '）'); }
+    } catch (er) { fail(er); busy(btn, false); return; }
+    await exaLoad();
+  });
+
   // ── 设置面板 ──
   const stepHTML = k => '<div class="step"><button type="button" data-k="' + k + '" data-dd="-1" aria-label="减少">−</button><input id="f-' + k + '" type="number" inputmode="numeric" min="' + NUM[k][1] + '" max="' + NUM[k][2] + '"><span class="u">' + NUM[k][0] + '</span><button type="button" data-k="' + k + '" data-dd="1" aria-label="增加">+</button></div>';
   const fld = (k, label, ctrl, extra = '') => '<div class="field" data-key="' + k + '" id="fd-' + k + '"><div class="fl"><span>' + label + '</span><span class="inh" id="i-' + k + '"></span>' + extra + '</div>' + ctrl + '</div>';
@@ -324,7 +464,19 @@ const Adm = (() => {
       '<section class="box" id="bxQ"><h2>季度测 <small>按设置出卷</small></h2>' + fld('qOn', '要季度测', sw('qOn', '要季度测')) + fld('qEvery', '每几周考一次', stepHTML('qEvery')) + fld('qN', '抽多少个词', stepHTML('qN')) + fld('qPass', '及格线', stepHTML('qPass')) + '</section>' +
       '<section class="box" id="bxY"><h2>年测 <small>按设置出卷</small></h2>' + fld('yOn', '要年测', sw('yOn', '要年测')) + fld('yEvery', '每几周考一次', stepHTML('yEvery')) + fld('yN', '抽多少个词', stepHTML('yN')) + fld('yPass', '及格线', stepHTML('yPass')) + '</section>' +
       '<section class="box"><h2>几场测验撞在同一周</h2>' + fld('merge', '怎么考', seg('c-merge', '同一周几场测验', [['merge', '合成一场'], ['both', '分开考']])) + '</section>' +
-      '<section class="box"><h2>拼图</h2>' + fld('dim', '回顾测答错时，格子变暗', sw('dim', '答错时格子变暗'), hint('关着＝不变暗，只记进错词本')) + '</section>';
+      '<section class="box"><h2>拼图</h2>' + fld('dim', '回顾测答错时，格子变暗', sw('dim', '答错时格子变暗'), hint('关着＝不变暗，只记进错词本')) + '</section>' +
+      '<section class="box" id="bxEx"' + (scope === 'global' ? '' : ' hidden') + '><h2>拓展例句 <small>卡片背面的知识例句、时事例句，学生点了才生成</small></h2>' +
+      fld('exOn', '拓展例句', sw('exOn', '拓展例句'), hint('关着＝学生页不再生成，也不给已有的句子')) +
+      fld('exWhoK', '知识例句用哪家', seg('c-exWhoK', '知识例句用哪家', [['anthropic', '只用 Claude'], ['openai', '只用 OpenAI'], ['both', '两家轮流'], ['off', '关闭']]), hint('关闭＝学生页不显示「知识例句」按钮（管理端试生成照样能用）')) +
+      fld('exWhoN', '时事例句用哪家', seg('c-exWhoN', '时事例句用哪家', [['openai', '只用 OpenAI'], ['anthropic', '只用 Claude'], ['both', '两家轮流'], ['off', '关闭']]), hint('两家轮流：本期剩余预算÷剩余天数多的先用；一家出错、额度用完时换另一家。关闭＝学生页不显示「时事例句」按钮（时事先关着，验收通过再开）')) +
+      fld('exModelA', 'Claude 模型', '<input id="f-exModelA" class="tin" maxlength="64" spellcheck="false" autocomplete="off" aria-label="Claude 模型">', hint('默认 claude-opus-5-5；换模型前先在「拓展例句」页填好它的价格')) +
+      fld('exModelO', 'OpenAI 模型', '<input id="f-exModelO" class="tin" maxlength="64" spellcheck="false" autocomplete="off" aria-label="OpenAI 模型">', hint('默认 gpt-6.2-astra；也可以改成 gpt-6.2-sol（便宜约 4 倍）')) +
+      fld('exPerWord', '每个词每类最多几句', stepHTML('exPerWord'), hint('够数以后循环给已有的句子；隐藏的、过期的不占位')) +
+      fld('exPerDay', '每人每天最多生成几次', stepHTML('exPerDay'), hint('0 ＝不限；看已有的句子不算次数')) + fld('exPerMin', '每人每分钟最多生成几次', stepHTML('exPerMin')) +
+      fld('exInflight', '全站同时生成几个', stepHTML('exInflight')) + fld('exNewsDays', '时事句多久换新', stepHTML('exNewsDays')) +
+      fld('exNewsWin', '只用多少天内的新闻', stepHTML('exNewsWin')) + fld('exNoMatchDays', '找不到合适新闻后，隔几天再搜', stepHTML('exNoMatchDays')) +
+      fld('exDomains', '时事新闻只搜这些网站', '<textarea id="f-exDomains" rows="6" spellcheck="false" aria-label="新闻只搜哪些网站"></textarea>', hint('每行一个，最多 20 个，例如 nhk.or.jp（不写 https:// 和路径）')) +
+      '<div class="note">每月预算、价格、用量、学生报错、试生成在顶上的「拓展例句」页。</div></section>';
     // 方案只管「各档怎么学」：别的块都不显示（元素留着，页面的其他计算照常）
     if (scope === 'tpl') h = h.replace(/<section class="box"(?! id="bxLv")/g, '<section class="box" hidden');
     return h;
@@ -357,6 +509,8 @@ const Adm = (() => {
     if (k === 'total') return v === 'A' ? '新词照旧＋错词' : '总数不变';
     if (k === 'untaught') return v === 'test' ? '照考' : '挪到下周';
     if (k === 'merge') return v === 'merge' ? '合成一场' : '分开考';
+    if (k === 'exWhoK' || k === 'exWhoN') return WHO[v] || String(v);
+    if (k === 'exDomains') return Array.isArray(v) ? v.join('、') : String(v);
     return String(v);
   }
   function changes() {
@@ -387,7 +541,8 @@ const Adm = (() => {
   }
   function plan(e) { const out = []; let left = words(e); while (left > 0 && out.length < 3000) { for (let i = 0; i < e.learnW && left > 0; i++) { out.push('L'); left -= e.weekly; } for (let i = 0; i < e.revW; i++) out.push('R'); } return out; }
   function lockBox(id, off, keep) { const bx = $(id); if (!bx) return; bx.querySelectorAll('.field').forEach(f => { if (f.dataset.key === keep) return; f.classList.toggle('dim', off); f.querySelectorAll('input,button:not([data-reset])').forEach(x => x.disabled = off); }); }
-  function syncInputs() { const e = eff(); for (const k in NUM) { const el = $('f-' + k); if (el) el.value = e[k]; } LV.forEach((l, i) => { const el = $('r' + i); if (el) el.value = e.ratio[i]; }); }
+  function syncInputs() { const e = eff(); for (const k in NUM) { const el = $('f-' + k); if (el) el.value = e[k]; }
+    ['exModelA', 'exModelO'].forEach(k => { const el = $('f-' + k); if (el) el.value = e[k] || ''; }); const dm = $('f-exDomains'); if (dm) dm.value = (e.exDomains || []).join('\n'); LV.forEach((l, i) => { const el = $('r' + i); if (el) el.value = e.ratio[i]; }); }
   function whoTxt() {
     const t = TPL(), s = stuOf(stuKey);
     const nm = scope === 'global' ? '所有学生的默认' : scope === 'tpl' ? '方案「' + t[tplKey] + '」' : (s ? s.name : '');
@@ -509,7 +664,11 @@ const Adm = (() => {
     if (!D || $('app').dataset.role !== 'adm' || e.target.closest('.modal')) return;
     const t = e.target;
     if (t.closest('button:disabled')) return;
-    const at = t.closest('[data-atab]'); if (at) { if (at.dataset.atab === tab || guard()) return; tab = at.dataset.atab; draft = null; render(); return; }
+    const at = t.closest('[data-atab]'); if (at) { if (at.dataset.atab === tab || guard()) return; tab = at.dataset.atab; draft = null; if (tab === 'ex') EXA = null; render(); return; }
+    if (tab === 'ex') {
+      const xa = t.closest('[data-xa]'); if (xa) { exaAct(xa); return; }
+      const xs = t.closest('#xtk button[data-v], #xtp button[data-v]'); if (xs) { if (xs.parentElement.id === 'xtk') exT.kind = xs.dataset.v; else exT.prov = xs.dataset.v; exT.res = null; render(); return; }
+    }
     if (t.closest('[data-a="add"]')) { addModal(); return; }
     if (t.closest('[data-a="reqs"]')) { reqsModal(); return; }
     const st = t.closest('[data-stu]'); if (st) { detailModal(st.dataset.stu); return; }
@@ -558,6 +717,16 @@ const Adm = (() => {
     if (savingCfg) { toast('正在保存，等一下'); return; }
     if (t.id === 'pickTpl' || t.id === 'pickStu') { if (guard()) { t.value = t.id === 'pickTpl' ? tplKey : stuKey; return; } if (t.id === 'pickTpl') tplKey = t.value; else stuKey = t.value; draft = null; render(); return; }
     if (!draft) return;
+    if (t.id === 'f-exModelA' || t.id === 'f-exModelO') {
+      const k = t.id.slice(2), v = t.value.trim();
+      if (!/^[a-z0-9][a-z0-9._-]{1,63}$/.test(v)) { t.value = eff()[k] || ''; toast('模型名格式不对（只能有小写字母、数字、点、横线），没有改'); return; }
+      t.value = v; setVal(k, v); return;
+    }
+    if (t.id === 'f-exDomains') {
+      const a = [...new Set(t.value.split(/[\s,，、]+/).map(s => s.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')).filter(Boolean))];
+      if (!a.length || a.length > 20 || a.some(d => !/^([a-z0-9-]+\.)+[a-z]{2,}$/.test(d) || d.length > 60)) { t.value = (eff().exDomains || []).join('\n'); toast('网站要填 1～20 个，每行一个，例如 nhk.or.jp，没有改'); return; }
+      t.value = a.join('\n'); setVal('exDomains', a); return;
+    }
     if (t.id && t.id.startsWith('f-') && NUM[t.id.slice(2)]) {
       const k = t.id.slice(2), [, mn, mx] = NUM[k], raw = t.value.trim(), v = Number(raw), cur = eff()[k];
       if (raw === '' || !Number.isFinite(v)) { t.value = cur; toast('要填 ' + mn + '～' + mx + ' 之间的整数，没有改'); return; }

@@ -262,3 +262,22 @@ table.t th{color:var(--muted);font-weight:400;font-size:12px;border-top:0}
 .note.pno{background:var(--bad-bg);color:var(--ink)}
 #myplan .list>.it>.gbtn{flex:none}
 #bxLv>.copyrow{margin-top:4px}
+/* 拓展例句（第 34 步） */
+.xex{padding-top:10px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+.xex .lab{color:var(--muted)}.xex .lab small{font-weight:400;letter-spacing:0;margin-left:6px}
+.xbtns{display:flex;gap:8px;flex-wrap:wrap}
+.xbtns .gbtn.on{background:var(--ai-soft);border-color:var(--ai)}
+.xs{background:var(--bg);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.xs .jp{font-family:var(--jp);font-size:17px;line-height:2;overflow-wrap:anywhere}.xs .jp ruby{ruby-align:start}
+.xs .zh{color:var(--muted);font-size:14px}
+.xs .xt{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.xact{display:flex;align-items:center;justify-content:space-between;gap:6px 10px;flex-wrap:wrap;margin-top:2px}
+.xtag{font-size:12px;color:var(--ai);min-width:0;overflow-wrap:anywhere}.xtag a{color:var(--ai)}
+.xbtn2{display:inline-flex;align-items:center;gap:10px}.xbtn2 .gbtn{font-size:13px;padding:5px 10px}
+.xwait,.xmsg{font-size:13px;color:var(--muted)}
+.exu{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.exu .box{margin:0}
+.exl .it{display:block}.exl .xs{margin:6px 0}
+.extbl{width:100%;border-collapse:collapse;font-size:12px}.extbl td,.extbl th{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left;white-space:nowrap}
+.extw{overflow-x:auto}
+.field .tin,#f-exDomains{width:100%;max-width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font-size:15px;font-family:inherit}

@@ -59,6 +59,7 @@ const Stu = (() => {
     if (D && D.week && d.week && d.week.today !== D.week.today) { revDone = new Set(); if (mode === 'rev') mode = 'new'; }
     if (D && D.week && d.week && d.week.id !== D.week.id) for (const [tid, wid] of [...unsaved]) if (wid !== d.week.id) { unsaved.delete(tid); memAns.delete(tid); }
     D = d; stale = null; lastSync = Date.now();
+    exSetKinds(d.ex || null);   // 拓展例句哪几类开着（第 34 步起学生页读取会给）：所有卡片同步
   }
   function start(d) { apply(d); resetQueue(); render(); flushMarks(); }   // 上次没确认的打卡：打开页面就补
   // 读取一次：比后面发出的请求还晚回来的、比页面上已经显示的日期或周还旧的，都不用（返回 null）
@@ -104,12 +105,13 @@ const Stu = (() => {
     // 同一天：别的设备可能学过。词单没变就只更新每张卡的状态，正在学的这一轮顺序不打乱
     const ids = x => (x.cards || []).map(c => c.id).join();
     if (ids(d) !== ids(D) || mode === 'rev') {
-      if (T || (tab === 'study' && flipped)) { ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'myplan', 'plans', 'req'].forEach(k => D[k] = d[k]); lastSync = Date.now(); return; }
+      if (T || (tab === 'study' && flipped)) { ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'myplan', 'plans', 'req', 'ex'].forEach(k => D[k] = d[k]); exSetKinds(d.ex || null); lastSync = Date.now(); return; }
       apply(d); resetQueue(); render(); return;
     }
     const by = Object.fromEntries(d.cards.map(c => [c.id, c]));
     cards().forEach(c => { const n = by[c.id]; if (n) Object.assign(c, { st: n.st, done: n.done, again: n.again, wrong: n.wrong }); });
-    ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'review', 'week', 'myplan', 'plans', 'req'].forEach(k => D[k] = d[k]);
+    ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'review', 'week', 'myplan', 'plans', 'req', 'ex'].forEach(k => D[k] = d[k]);
+    exSetKinds(d.ex || null);   // 同一天的局部重读也带上新的开关状态
     lastSync = Date.now();
     // 从列表里点过来、排在最前面的那张卡（可能已经练过）留在最前面
     if (mode === 'new' && !flipped) { const need = todo().map(c => c.id), set = new Set(need), keep = pin && queue[0] === pin ? pin : null; queue = queue.filter(id => set.has(id) || id === keep).concat(need.filter(id => !queue.includes(id))); }
@@ -727,6 +729,9 @@ const Stu = (() => {
   document.addEventListener('click', async e => {
     if (!D || $('app').dataset.role === 'adm' || e.target.closest('.modal')) return;
     const t = e.target;
+    // 拓展例句：只显示，不评分、不打卡、不翻卡。上面两个按钮＝看这一类（已经有了就直接切过去）；句子下面的「换一句」＝再要一句
+    const xk = t.closest('[data-exk]'); if (xk) { if (!xk.disabled) exGen(xk.dataset.wid, xk.dataset.exk, KEY, !!xk.closest('.xs')); return; }
+    const xr = t.closest('[data-exrep]'); if (xr) { exReport(xr.dataset.exrep); return; }
     if (saving && t.closest('[data-tab],[data-act="all"],[data-act="rev"],[data-act="back"],[data-act="more"],[data-act="list"],[data-act="unlist"],[data-act="round"],[data-wid]')) { toast('正在保存，等一下'); return; }
     const tb = t.closest('[data-tab]'); if (tb) {
       if (submitting) { toast('正在交卷，等一下'); return; }
