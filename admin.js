@@ -6,7 +6,8 @@ const Adm = (() => {
   let draftBase = null, draftVer = null, rebase = null, detailSeq = 0, deciding = false;   // 草稿开始编辑时的设置和版本号（两个窗口同时改时用来核对、合并）
   const NUM = { srsN: ['个', 0, 200, 5], weekly: ['个', 10, 500, 10], days: ['天', 1, 7, 1], addN: ['个', 5, 100, 5], learnW: ['周', 1, 12, 1], revW: ['周', 0, 4, 1], pass: ['%', 50, 100, 5],
     revN: ['个', 10, 500, 10], revPass: ['%', 50, 100, 5], qEvery: ['周', 4, 52, 1], qN: ['个', 10, 1000, 10], qPass: ['%', 50, 100, 5], yEvery: ['周', 12, 104, 1], yN: ['个', 10, 2000, 10], yPass: ['%', 50, 100, 5],
-    exPerWord: ['句', 1, 20, 1], exPerDay: ['次', 0, 5000, 10], exPerMin: ['次', 1, 60, 1], exInflight: ['个', 1, 50, 1], exNewsDays: ['天', 1, 365, 1], exNewsWin: ['天', 7, 365, 1], exNoMatchDays: ['天', 1, 60, 1] };
+    exPerWord: ['句', 1, 20, 1], exPerDay: ['次', 0, 5000, 10], exPerMin: ['次', 1, 60, 1], exInflight: ['个', 1, 50, 1], exNewsDays: ['天', 1, 365, 1], exNewsWin: ['天', 7, 365, 1], exNoMatchDays: ['天', 1, 60, 1],
+    drillMax: ['题', 5, 500, 10], drillPer: ['题', 1, 5, 1], starN: ['次', 10, 1000, 10], starMinQ: ['道', 5, 500, 5], retestN: ['场', 0, 50, 1] };
   const LAB = { weekly: '每周新词数', days: '每周学几天', addOn: '再来一组', addN: '一组几个', mode: '学法', ratio: '各档比例', start: '从哪一档开始', only: '学哪几档',
     srsOn: '每天复习', srsN: '每天最多复习', learnW: '先学几周', revW: '回顾几周', untaught: '还没学的词', pass: '周测及格线', types: '周测题型', carryFail: '没及格带错词', carryPass: '及格也带错词', total: '下周学多少',
     revN: '回顾周抽多少', revMust: '错词一定抽到', revPass: '回顾周及格线', qOn: '季度测', qEvery: '季度测间隔', qN: '季度测抽多少', qPass: '季度测及格线',
@@ -14,10 +15,18 @@ const Adm = (() => {
     order: '本周词单顺序', instant: '答题时当场判对错', whyT: '当场显示解析的题型',
     exOn: '拓展例句', exWhoK: '知识例句用哪家', exWhoN: '时事例句用哪家', exModelA: 'Claude 模型', exModelO: 'OpenAI 模型', exPerWord: '每个词每类最多几句',
     exPerDay: '每人每天最多生成几次', exPerMin: '每人每分钟最多生成几次', exInflight: '全站同时生成几个', exNewsDays: '时事句多久换新', exNewsWin: '只用多少天内的新闻',
-    exNoMatchDays: '找不到新闻后隔几天再搜', exDomains: '新闻只搜哪些网站' };
+    exNoMatchDays: '找不到新闻后隔几天再搜', exDomains: '新闻只搜哪些网站',
+    drillOn: '开放刷题', drillScopes: '刷题可选范围', drillMax: '每次最多几题', drillPer: '同一次同一个词最多几题', starShow: '题目上方显示档和难度星级',
+    testFresh: '测验优先抽没练过的题', starAuto: '按真实答对率自动修正星级', starN: '作答多少次以后开始修正', starMinQ: '同一档至少几道够数的题才排位',
+    drillOrder: '默认出题方式', drillOrders: '学生可以选的出题方式', retestN: '最近几场可以整卷再做' };
   const WHO = { anthropic: '只用 Claude', openai: '只用 OpenAI', both: '两家轮流', off: '关闭' };
-  const SW = ['srsOn', 'addOn', 'carryFail', 'carryPass', 'revMust', 'qOn', 'yOn', 'dim', 'instant', 'exOn'];
-  const SEGS = [['mode', 'c-mode'], ['total', 'c-total'], ['start', 'c-start'], ['untaught', 'c-untaught'], ['merge', 'c-merge'], ['order', 'c-order'], ['exWhoK', 'c-exWhoK'], ['exWhoN', 'c-exWhoN']];
+  const SW = ['srsOn', 'addOn', 'carryFail', 'carryPass', 'revMust', 'qOn', 'yOn', 'dim', 'instant', 'exOn', 'drillOn', 'starShow', 'testFresh', 'starAuto'];
+  // 刷题可选范围（第 36 步）：没写的算开
+  const DSC = [['learned', '学过的词'], ['err', '错词本里的词'], ['dwrong', '我刷题时错过的'], ['week', '本周的词'], ['all', '全部（含没学过的）']];
+  const scOn = (v, k) => !(v && v[k] === false);
+  const DORD = [['fresh', '优先没做过的'], ['done', '只出做过的题'], ['rand', '全部随机']];   // 刷题出题方式（第 36 步）
+  const has36 = () => !!(D && D.global && 'drillOn' in D.global);   // 数据库跑过第 36 步（所有学生的默认里有刷题的设置）
+  const SEGS = [['mode', 'c-mode'], ['total', 'c-total'], ['start', 'c-start'], ['untaught', 'c-untaught'], ['merge', 'c-merge'], ['order', 'c-order'], ['exWhoK', 'c-exWhoK'], ['exWhoN', 'c-exWhoN'], ['drillOrder', 'c-drillOrder']];
   const MODE = { mix: '按比例混合', step: '逐级', only: '只学某几档' };
   const DEF_RATIO = [9, 8, 27, 22, 34];
   // 测验题型：前 5 种是 JLPT 题型（题库里的题），没写过的默认开；后 3 种简单题没写过的默认关
@@ -64,13 +73,14 @@ const Adm = (() => {
 
   function render() {
     typing = false;
-    const tabs = [['stu', '学生'], ['cfg', '设置'], ['ex', '拓展例句'], ['log', '改动记录']];
+    const tabs = [['stu', '学生'], ['cfg', '设置'], ['ex', '拓展例句'], ['qs', '题目难度'], ['log', '改动记录']];
     let h = '<header class="top"><div class="wrap wide"><div class="row"><div class="brand"><b>单词系统 · 管理</b><span>' + esc(D.me) + '</span></div>' +
       '<div class="seg" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-atab="' + k + '" aria-pressed="' + (tab === k) + '">' + n + '</button>').join('') + '</div></div>' +
       (tab === 'cfg' ? scopeBar() : '') + '</div></header>';
     if (tab === 'stu') h += '<main class="wrap wide">' + stuHTML() + '</main>';
     else if (tab === 'log') h += '<main class="wrap wide">' + logHTML() + '</main>';
     else if (tab === 'ex') h += '<main class="wrap wide">' + exaHTML() + '</main>';
+    else if (tab === 'qs') h += '<main class="wrap wide">' + qsHTML() + '</main>';
     else h += '<main class="wrap">' + (copied ? copyWarn() : '') + cfgHTML() + '</main>' + saveBar();
     $('app').innerHTML = h;
     if (tab === 'cfg') {
@@ -152,8 +162,10 @@ const Adm = (() => {
         ((w.tests || []).length ? w.tests.map(x => (KN[x.kind] || '') + ' ' + (x.done ? num(x.score) + '/' + num(x.total) + ' ' + (x.passed ? '<span class="chip ok">及格</span>' : x.manual ? '<span class="chip">放行</span>' : '<span class="chip bad">没及格</span> <button class="link" data-tpass="' + esc(x.id) + '">记为及格</button>') : '考到一半')).join('<br>') : '没考') + '</td></tr>').join('') : '<tr><td colspan="5" class="muted">' + (s.active ? '还没有开始的周（开课日之前不生成）' : '没有记录') + '</td></tr>') +
       '</table></div>' +
       '<div class="lab">错过的词 ' + wrong.length + ' 个' + (wrong.length > 60 ? '，下面显示错得最多的 60 个' : '') + '</div>' +
-      (wrong.length ? '<div class="list">' + wrong.slice(0, 60).map(x => '<div class="it"><span><span class="nm" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r) + '</span></span><span class="sub">' + esc(x.m) + ' · 错 ' + num(x.times) + ' 次' + (x.st === 'correct' ? ' · 后来对了' : '') + (x.off ? ' · 已停用' : '') + '</span></div>').join('') + '</div>' : '<div class="muted">还没有。</div>'));
+      (wrong.length ? '<div class="list">' + wrong.slice(0, 60).map(x => '<div class="it"><span><span class="nm" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r) + '</span></span><span class="sub">' + esc(x.m) + ' · 错 ' + num(x.times) + ' 次' + (x.st === 'correct' ? ' · 后来对了' : '') + (x.off ? ' · 已停用' : '') + '</span></div>').join('') + '</div>' : '<div class="muted">还没有。</div>') +
+      '<div class="lab">刷题 <small class="muted">不算成绩、不进错词本</small></div><div id="dstat" class="muted">正在读取……</div>');
     m.classList.add('det');
+    drillStats(sid, m, seq);
     let acting = false;
     m.addEventListener('click', async e => {
       const tp = e.target.closest('[data-tpass]');
@@ -179,6 +191,21 @@ const Adm = (() => {
         if ((d === 'extend' || d === 'refill') && /已经延长过|换到第|旧了|已经有新词|已经开考/.test(er.message)) { m.close(); await reload(); detailModal(sid); }
       }
     });
+  }
+  // 学生详情里的刷题统计（第 36 步）：总题数、正确率、最近 7 天／30 天、按题型、刷题常错的词前 20 个
+  async function drillStats(sid, m, seq) {
+    let r = null, err = null;
+    try { r = await rpc('adm_stu_op', { sid, act: 'drill', a: {} }, { obj: true }); } catch (e) { err = e; }
+    const el = m.querySelector('#dstat'); if (!el || seq !== detailSeq || !m.isConnected) return;
+    if (err) { el.textContent = '没读到（' + err.message + '）'; return; }
+    const pc = (a, b) => num(b) ? Math.round(num(a) * 100 / num(b)) + '%' : '—';
+    const d7 = r.d7 || {}, d30 = r.d30 || {}, ty = r.types || {}, top = Array.isArray(r.top) ? r.top : [];
+    if (!num(r.n)) { el.textContent = '还没刷过题。'; return; }
+    el.classList.remove('muted');
+    el.innerHTML = '<div class="stats"><div class="stat"><b>' + num(r.n) + '</b><span>一共刷的题</span></div><div class="stat"><b>' + pc(r.right, r.n) + '</b><span>正确率</span></div><div class="stat"><b>' + num(d7.n) + '</b><span>最近 7 天（正确率 ' + pc(d7.right, d7.n) + '）</span></div></div>' +
+      '<div class="small muted">最近 30 天 ' + num(d30.n) + ' 题，正确率 ' + pc(d30.right, d30.n) + (r.last ? ' · 最后一次 ' + stamp(r.last) : '') + '</div>' +
+      '<div class="scroll"><table class="t dst-t"><tr><th>题型</th><th>题数</th><th>正确率</th></tr>' + Object.keys(QT).filter(k => ty[k]).map(k => '<tr><td lang="ja">' + QT[k] + '</td><td>' + num(ty[k].n) + '</td><td>' + pc(ty[k].right, ty[k].n) + '</td></tr>').join('') + '</table></div>' +
+      (top.length ? '<div class="small muted" style="margin-top:6px">刷题常错的词（前 ' + top.length + ' 个）</div><div class="list">' + top.map(x => '<div class="it"><span><span class="nm" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r && x.r !== x.w ? x.r : '') + '</span> <span class="chip">' + esc(x.lvl) + '</span></span><span class="sub">' + esc(x.m) + ' · 错 ' + num(x.wrong) + ' / ' + num(x.n) + ' 次</span></div>').join('') + '</div>' : '');
   }
   // ── 考没过后「调整新词量」 ──
   // 最近一次正式交卷没及格（老师放行的不算）、还没处理
@@ -253,7 +280,11 @@ const Adm = (() => {
     showKeep();
     // 一次请求、同一把锁里算三份（维持、只改一周、每周都改），顶上「现在的样子」和三个按钮都用这一次的结果；后发的请求才算数
     let pseq = 0, ptimer = 0;
-    const okPlan = (x, base) => !!x && typeof x.sig === 'string' && x.base === base && !!x.target && !!x.first;
+    // 回复要齐：指纹、基准、怎么改和按钮一致；页面上显示的周号、日期、各发多少（first）、之后每周多少（second）都要是数字
+    const isN = v => Number.isInteger(v) && v >= 0, isWk = w => !!w && Number.isInteger(w.no) && w.no > 0 && typeof w.start === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(w.start);
+    const okPlan = (x, base, how) => !!x && typeof x.sig === 'string' && x.base === base && x.how === how && isWk(x.target) && (x.then == null || isWk(x.then))
+      && !!x.first && ['cut', 'A', 'B'].includes(x.first.rule) && isN(x.first.new) && isN(x.first.total) && isN(x.first.carry)
+      && !!x.second && (x.second.rule === 'B' ? isN(x.second.total) : x.second.rule === 'A' && isN(x.second.new)) && isN(x.cur_no);
     const preview = () => {
       clearTimeout(ptimer);
       const raw = inp.value.trim(), v = Number(raw), my = ++pseq, good = raw !== '' && Number.isInteger(v) && v >= 0 && v <= 500;
@@ -264,7 +295,7 @@ const Adm = (() => {
         try {
           r = await rpc('adm_stu_op', { sid, act: 'plans', a: { tid, n: good ? v : '' } }, { obj: true });
           // 回复不完整（缺指纹、三份的基准对不上）也当没算出来
-          if (!r || typeof r.base !== 'string' || !okPlan(r.keep, r.base) || (good && !okPlan(r.once, r.base)) || (good && v >= 10 && !okPlan(r.long, r.base))) throw new Error('回复不对');
+          if (!r || typeof r.base !== 'string' || !okPlan(r.keep, r.base, 'keep') || (good && !okPlan(r.once, r.base, 'once')) || (good && v >= 10 && !okPlan(r.long, r.base, 'long'))) throw new Error('回复不对');
         } catch (e) { err = e; }
         if (my !== pseq || !m.isConnected) return;
         if (err) {   // 没算出来：都不能点，给「重新算」
@@ -272,7 +303,8 @@ const Adm = (() => {
           return;
         }
         const a1 = good ? r.once : null, a2 = good && v >= 10 ? r.long : null;
-        pl = r.keep; showKeep();
+        pl = r.keep; if (typeof r.own_weekly === 'boolean') d.own_weekly = r.own_weekly;   // 第 36 步：这个学生自己的每周新词数也跟着这一次刷新（别的老师可能刚改过）
+        showKeep();
         ready = { keep: r.keep, once: a1, long: a2 };
         if (good) pv.innerHTML = (a1 ? '<div><b>只改下个新学周：</b>' + esc(planTxt(a1)) + '</div>' : '') +
           '<div><b>每周都改：</b>' + (a2 ? esc(planTxt(a2)) + (a2.old_cut != null ? '（第 ' + num(a2.target.no) + ' 周已经单独设过 ' + num(a2.old_cut) + ' 个，保存时会问要不要保留）' : '') : '每周新词数要 10～500') + '</div>';
@@ -464,6 +496,51 @@ const Adm = (() => {
     }).join('') + '</div></div>';
   }
 
+  // ── 题目难度页（第 36 步）：各档星级分布、够数的题、星级和初始不一样的题；可以马上重算 ──
+  let QS = null, qsBusy = false, qsSeq = 0;
+  const QT = { yomi: '漢字読み', hyoki: '表記', bunmyaku: '文脈規定', iikae: '言い換え', yoho: '用法' };
+  const starTxt = v => Number.isInteger(v) && v >= 1 && v <= 5 ? '★'.repeat(v) : '—';
+  const qsArgs = extra => Object.assign({ view: (QS && QS.view) || 'diff' }, QS && QS.lv ? { lv: QS.lv } : {}, extra || {});
+  async function qsLoad(act, a) {
+    if (qsBusy && act !== 'load') return;
+    const my = ++qsSeq; qsBusy = true;
+    let r = null, err = null;
+    try { r = await rpc('adm_qstar', { act: act || 'load', a: a || {} }, { obj: true }); } catch (e) { err = e; }
+    if (my !== qsSeq) return;
+    qsBusy = false;
+    if (err) { if (act === 'recalc') fail(err); QS = QS && !QS.err ? QS : { err: err.message }; }
+    else { QS = r; QS.lv = (a && a.lv) || ''; if (act === 'recalc') toast('已重算：' + num(r.done && r.done.changed) + ' 道题显示的星变了'); }
+    if (tab === 'qs') render();
+  }
+  function qsHTML() {
+    if (!QS) { if (!qsBusy) setTimeout(() => qsLoad('load'), 0); return '<div class="box">正在读取……</div>'; }
+    if (QS.err) return '<div class="box"><h2>没读到</h2><div class="muted">' + esc(QS.err) + '（数据库跑完第 36 步才有这一页）</div><button class="gbtn" data-qa="reload">重新读取</button></div>';
+    const R = QS.run || {}, LVS = Array.isArray(QS.levels) ? QS.levels : [], L = Array.isArray(QS.list) ? QS.list : [], NL = num(QS.nlist), off = num(QS.off);
+    let h = '<div class="note">每道题 1～5 星，<b>同一档里比</b>（1 星最容易）。初始星级是 Codex 逐题打的；一道题有效作答（每个学生只算第一次）够 ' + num(QS.min, 30) + ' 次以后，' +
+      (QS.auto === false ? '<b>自动修正现在关着</b>（在「设置 → 所有学生的默认 → 题目难度星级」打开）。' : '在同一档里按真实答对率排位，再和初始星级按作答数加权（答的人越多越靠真实答对率）。') + '</div>';
+    h += '<div class="box"><div class="row"><b>最近一次重算：' + (R.at ? stamp(R.at) : '还没算过') + '</b><button type="button" class="gbtn" data-qa="recalc"' + (qsBusy ? ' disabled' : '') + '>' + (qsBusy ? '正在算……' : '现在重算') + '</button></div>' +
+      '<div class="muted small">够数的题 ' + num(R.n) + ' 道，其中按真实答对率排了位的 ' + num(R.nreal) + ' 道（同一档够数的题要有 ' + num(QS.minq, 20) + ' 道以上、答对率不全一样才排）；上次重算变了 ' + num(R.changed) + ' 道（在下面「上一次重算变了的」看）。每天第一次打开管理端时自动算一次。</div></div>';
+    h += '<div class="box"><h2>各档星级 <small>1～5 星各几道：上一行初始，下一行现在</small></h2><div class="scroll"><table class="t qst"><tr><th>档</th><th>题数</th><th>1 星 → 5 星</th><th>变了</th></tr>' +
+      (LVS.length ? LVS.map(x => '<tr><td>' + esc(x.lvl) + '</td><td>' + num(x.q) + '<div class="small muted">够数 ' + num(x.enough) + '</div>' + (num(x.nostar) ? '<div class="small bad">没有星级 ' + num(x.nostar) + '</div>' : '') + '</td><td><div class="qsd">' + (x.est || []).map(v => '<span>' + num(v) + '</span>').join('') + '</div><div class="qsd" style="margin-top:3px">' + (x.cur || []).map(v => '<span>' + num(v) + '</span>').join('') + '</div></td><td>' + num(x.diff) + '</td></tr>').join('') : '<tr><td colspan="4" class="muted">题库里还没有题</td></tr>') + '</table></div></div>';
+    const lvSel = '<select id="qsLv" aria-label="只看哪一档"><option value="">全部档</option>' + LV.map(l => '<option' + (QS.lv === l ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>';
+    const pager = NL > 100 ? '<div class="row" style="justify-content:flex-start;gap:8px"><button type="button" class="gbtn" data-qa="page" data-off="' + Math.max(0, off - 100) + '"' + (off > 0 ? '' : ' disabled') + '>上一页</button><span class="muted small">第 ' + (off + 1) + '～' + Math.min(NL, off + 100) + ' 道（共 ' + NL + ' 道）</span><button type="button" class="gbtn" data-qa="page" data-off="' + (off + 100) + '"' + (off + 100 < NL ? '' : ' disabled') + '>下一页</button></div>' : '';
+    const last = QS.view === 'last', vseg = '<div class="seg" role="group" aria-label="看哪些题"><button type="button" data-qa="view" data-v="diff" aria-pressed="' + !last + '">现在和初始不一样的</button><button type="button" data-qa="view" data-v="last" aria-pressed="' + last + '">上一次重算变了的</button></div>';
+    h += '<section class="box qsl"><h2>星级变了的题 <small>' + (last ? '上一次重算时显示的星变了的（含变回初始星级的）' : '现在的星和初始星级不一样的，最近变的在前') + '</small></h2><div class="row" style="justify-content:flex-start;gap:8px">' + vseg + lvSel + '</div>' + pager +
+      (L.length ? '<div class="list">' + L.map(x => '<div class="it"><div><b lang="ja">' + esc(x.w) + '</b> <span class="muted" lang="ja">' + esc(x.r && x.r !== x.w ? x.r : '') + '</span> <span class="chip">' + esc(x.lvl) + '</span> <span class="chip">' + esc(QT[x.t] || x.t) + '</span></div>' +
+        '<div class="qq">' + esc(plain(x.q || '')) + '</div>' +
+        '<div class="small">初始 ' + starTxt(x.est) + ' → 现在 <b>' + starTxt(Number.isInteger(x.now) ? x.now : x.star) + '</b>' + (Number.isInteger(x.now) && x.now === x.est ? '（回到初始）' : '') + (Number.isInteger(x.prev) && x.prev !== (Number.isInteger(x.now) ? x.now : x.star) ? '（变之前 ' + starTxt(x.prev) + '）' : '') + ' · 按答对率排位 ' + starTxt(x.real) +
+        ' · 有效作答 ' + num(x.n) + ' 次，答对 ' + (num(x.n) ? Math.round(num(x.ok) * 100 / num(x.n)) : 0) + '%' + (x.at ? ' · ' + stamp(x.at) + ' 变的' : '') + '</div></div>').join('') + '</div>' : '<div class="muted">没有。' + (num(R.n) ? '' : '作答次数还不够（一道题要 ' + num(QS.min, 30) + ' 个学生做过）。') + '</div>') + pager + '</section>';
+    return h;
+  }
+  async function qsAct(a) {
+    const act = a.dataset.qa;
+    if (act === 'reload') { QS = null; render(); return; }
+    if (act === 'recalc') { busy(a, true); await qsLoad('recalc', qsArgs()); return; }
+    if (act === 'view') { if (QS && QS.view === a.dataset.v) return; busy(a, true); await qsLoad('load', qsArgs({ view: a.dataset.v })); return; }
+    if (act === 'page') { busy(a, true); await qsLoad('load', qsArgs({ off: num(a.dataset.off) })); }
+  }
+  document.addEventListener('change', e => { if (D && $('app').dataset.role === 'adm' && tab === 'qs' && e.target && e.target.id === 'qsLv') qsLoad('load', Object.assign(qsArgs(), { lv: e.target.value || undefined })); });
+
   // ── 拓展例句页：本期两家用量和预算、在途预留、学生报错、隐藏的句子、试生成、价格、最近调用 ──
   let EXA = null, exaBusy = false;
   const exT = { q: '', cands: [], wid: null, w: '', kind: 'know', prov: 'anthropic', res: null, busy: false, rid: null, ridFor: '' }, exR = { off: 0, list: null };
@@ -515,7 +592,7 @@ const Adm = (() => {
     const held = !!exT.rid && exT.ridFor === exSig();   // 上一次结果不明：按钮只按原编号查询
     h += '<section class="box" id="xtry"><h2>试生成 <small>真实调用（算进预算，标记为测试，不给学生看）：知识一次通常一笔；时事一次通常有搜证、制卡、核对三笔</small></h2>' +
       '<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><button type="button" class="gbtn" data-xa="ping"' + (exT.pinging ? ' disabled' : '') + '>检查云函数</button>' +
-      (exT.ping ? '<span class="chip ' + (exT.ping.ok ? 'ok' : 'bad') + '" style="white-space:normal">' + esc(exT.ping.text) + '</span>' : '<span class="muted small">验收第一步：云函数能启动、数据库连得上、两把钥匙填了（不调用两家、不花钱）</span>') + '</div>' +
+      (exT.ping ? '<span class="chip ' + (exT.ping.ok ? 'ok' : 'bad') + '" style="white-space:normal">' + esc(exT.ping.text) + '</span>' : '<span class="muted small">验收第一步：云函数能启动、数据库连得上、两把钥匙填了、DNS 检查（不调用两家、不花钱）</span>') + '</div>' +
       '<div class="muted small">上线验收：只验收准备启用的那几条（哪家＋哪一类）。每条至少一次「生成成功」并对上账本；时事是「搜过但暂无」时这条分支算通过，但要换个词再试，直到做出一张时事卡。</div>' +
       '<div class="row" style="justify-content:flex-start;gap:8px"><input id="xtq" placeholder="词的写法或编号，例如 月" maxlength="20" value="' + esc(exT.q) + '" style="max-width:220px"><button type="button" class="gbtn" data-xa="find">找词</button></div>' +
       (exT.cands.length ? '<div class="checks">' + exT.cands.map(c => '<button type="button" class="ck" data-xa="pick" data-id="' + esc(c.id) + '" data-w="' + esc(c.w) + '" aria-pressed="' + (exT.wid === c.id) + '">' + esc(c.lvl + ' ' + c.w + '（' + c.r + '）' + c.m) + '</button>').join('') + '</div>' : '') +
@@ -561,8 +638,12 @@ const Adm = (() => {
         // 必验：云函数启动、Claude SDK 加载、数据库连通；钥匙两家分别显示，只要求准备启用的那家（看「知识例句／时事例句用哪家」）填了
         const ks = r.keys || {}, need = Array.isArray(r.need) ? r.need : [];
         const keyText = pv => PN(pv) + ' 钥匙：' + (ks[pv] ? '已填' : '没填') + (need.includes(pv) ? (ks[pv] ? '' : '（要用，必须填）') : '（没启用，可以不填）');
-        const ok = r.state === 'ok' && !!r.sdk && !!r.db && need.every(pv => ks[pv]);
-        exT.ping = { ok, text: '云函数正常启动 · ' + (r.sdk ? 'SDK 已加载' : 'Claude SDK 没加载好') + ' · ' + (r.db ? '数据库连上了' : '数据库没连上') + ' · ' + keyText('openai') + ' · ' + keyText('anthropic') };
+        // dnsCheck：打开新闻原文前查 DNS 挡内网地址。fn＝运行环境有没有 Deno.resolveDns，ok＝实际查一个公网网站查得通；不通时时事例句会全部弃稿（知识例句不受影响）
+        const dc = r.dnsCheck && typeof r.dnsCheck === 'object' ? r.dnsCheck : null, newsOn = !!(EXA && EXA.who && EXA.who.news && EXA.who.news !== 'off');
+        const dnsOk = !!(dc && dc.fn && dc.ok);
+        const dnsText = 'DNS 检查：' + (!dc ? '云函数没回（旧版云函数）' : 'fn=' + (dc.fn ? '有' : '没有') + '、ok=' + (dc.ok ? '查得通' : '查不通') + (dnsOk ? '（时事例句能核对原文网站）' : '（时事例句打开原文会全部弃稿，知识例句不受影响）'));
+        const ok = r.state === 'ok' && !!r.sdk && !!r.db && need.every(pv => ks[pv]) && (!newsOn || dnsOk);
+        exT.ping = { ok, text: '云函数正常启动 · ' + (r.sdk ? 'SDK 已加载' : 'Claude SDK 没加载好') + ' · ' + (r.db ? '数据库连上了' : '数据库没连上') + ' · ' + keyText('openai') + ' · ' + keyText('anthropic') + ' · ' + dnsText };
       } catch (e) { exT.ping = { ok: false, text: '云函数没回话：' + (e.status ? '出错 ' + e.status + '（' + e.message + '）' : e.message) + '。到 Supabase 的 ex-gen → Logs 看一下' }; }
       exT.pinging = false; render(); return;
     }
@@ -627,7 +708,7 @@ const Adm = (() => {
       fld('addOn', '学完可以「再来一组」', sw('addOn', '学完可以再来一组'), hint('追加的词算进本周，一起考')) + fld('addN', '一组几个', stepHTML('addN')) +
       fld('order', '本周词单顺序', seg('c-order', '本周词单顺序', [['mix', '打乱'], ['lv', '按档从易到难']]), hint('打乱：各档的词、上周错词混在一起，同一周里顺序固定。按档：上周错词在前，新词从 N5 到 N1、常用的在前')) + '</section>' +
       '<section class="box" id="bxLv"><h2>' + (scope === 'tpl' ? '方案「' + esc(t[tplKey] || '') + '」：各档怎么学' : '各档怎么学') + ' <small>' + LV.map((l, i) => l + ' ' + CN[i]).join(' · ') + '</small></h2>' +
-      (scope === 'tpl' ? '<div class="muted">其他设置都跟「所有学生的默认」，要单独调某个学生请到「单个学生」。</div><div class="copyrow"><button type="button" class="gbtn" id="copyTpl">复制成新方案</button><button type="button" class="gbtn" id="renTpl">改名</button></div>' : '') +
+      (scope === 'tpl' ? '<div class="muted">方案还可以单独设下面的「刷题」「整卷再做一遍」「题目上方的档和难度星级」；其他设置都跟「所有学生的默认」，要单独调某个学生请到「单个学生」。</div><div class="copyrow"><button type="button" class="gbtn" id="copyTpl">复制成新方案</button><button type="button" class="gbtn" id="renTpl">改名</button></div>' : '') +
       fld('mode', '学法', seg('c-mode', '学法', [['mix', '按比例混合'], ['step', '逐级'], ['only', '只学某几档']])) +
       '<div class="small muted" id="lvNote" hidden></div>' +
       '<div class="sub2" id="pMix"><span class="inh" id="i-ratio"></span><div id="lvRows" style="display:flex;flex-direction:column;gap:8px">' +
@@ -643,6 +724,7 @@ const Adm = (() => {
       fld('types', '题型', '<div class="checks" id="c-types">' + TYPES.map(([v, nm]) => '<button type="button" class="ck" data-v="' + v + '" aria-pressed="false">' + nm + '</button>').join('') + '</div>', hint('每个词只考一题，从勾选的题型里随机出。前 5 种是 JLPT 考试题型（题库里出好的题）；这个词题库里没有的题型就换别的，都没有时出「看日语选中文」')) +
       fld('instant', '答题时当场判对错', sw('instant', '答题时当场判对错'), hint('开：每题选了马上显示对错，选了就不能改；关：可以改答案，交卷后再看错题。周测、回顾测、季度测、年测都按这一项')) +
       fld('whyT', '当场显示解析的题型', '<div class="checks" id="c-whyT">' + WHY.map(([v, nm]) => '<button type="button" class="ck" data-v="' + v + '" aria-pressed="false">' + nm + '</button>').join('') + '</div>', hint('勾上的题型，答完马上在选项下面显示解析。看日语选中文等 3 种简单题本来就没有解析。交卷后的错题解析照旧都有')) +
+      (has36() ? fld('testFresh', '测验优先抽没练过的题', sw('testFresh', '测验优先抽没练过的题'), hint('防背题：同一个词有好几种题型时，正式测验先出这个学生在练习、刷题里没做过的那种；都做过就照常随机')) : '') +
       fld('carryFail', '没及格时，错词带到下周', sw('carryFail', '没及格时错词带到下周')) + fld('carryPass', '及格了但有错词，也带到下周', sw('carryPass', '及格了但有错词也带到下周')) +
       fld('total', '带过去以后，下周学多少', seg('c-total', '下周学多少', [['A', '新词照旧＋错词'], ['B', '总数不变']])) + '<div class="note" id="totalTxt"></div></section>' +
       '<section class="box" id="bxRev"><h2>回顾周 <small id="revOff"></small></h2>' + fld('revN', '抽多少个词来考', stepHTML('revN'), hint('学过的词不够时，有多少考多少')) +
@@ -651,6 +733,22 @@ const Adm = (() => {
       '<section class="box" id="bxY"><h2>年测 <small>按设置出卷</small></h2>' + fld('yOn', '要年测', sw('yOn', '要年测')) + fld('yEvery', '每几周考一次', stepHTML('yEvery')) + fld('yN', '抽多少个词', stepHTML('yN')) + fld('yPass', '及格线', stepHTML('yPass')) + '</section>' +
       '<section class="box"><h2>几场测验撞在同一周</h2>' + fld('merge', '怎么考', seg('c-merge', '同一周几场测验', [['merge', '合成一场'], ['both', '分开考']])) + '</section>' +
       '<section class="box"><h2>拼图</h2>' + fld('dim', '回顾测答错时，格子变暗', sw('dim', '答错时格子变暗'), hint('关着＝不变暗，只记进错词本')) + '</section>' +
+      (has36() ? '<section class="box" id="bxDrill"><h2>刷题 <small>学生自己选词刷 JLPT 题；不算成绩、不进错词本、不算打卡。这一块保存后马上生效</small></h2>' +
+        fld('drillOn', '开放刷题', sw('drillOn', '开放刷题'), hint('关着＝学生页不显示「刷题」页签，已经开着的刷题也不再判')) +
+        fld('drillScopes', '学生可以选刷哪些词', '<div class="checks" id="c-drillScopes">' + DSC.map(([v, nm]) => '<button type="button" class="ck" data-v="' + v + '" aria-pressed="false">' + nm + '</button>').join('') + '</div>', hint('至少留一项。「我刷题时错过的」＝刷题时这个词最近一次做错；「全部」含学习范围里还没学的词')) +
+        fld('drillMax', '每次最多几题', stepHTML('drillMax'), hint('学生可以选 10／20／50／100（不超过这个数），也可以自己填')) +
+        fld('drillPer', '同一次同一个词最多几题', stepHTML('drillPer'), hint('先每个词出一题，词不够时才给同一个词出别的题型')) +
+        fld('drillOrder', '默认出题方式', seg('c-drillOrder', '默认出题方式', DORD), hint('优先没做过的：先出学生没见过的题；只出做过的题：只从学生在刷题、练习、测验里答过的题里出（复习用）；全部随机：不管做没做过')) +
+        fld('drillOrders', '学生可以选的出题方式', '<div class="checks" id="c-drillOrders">' + DORD.map(([v, nm]) => '<button type="button" class="ck" data-v="' + v + '" aria-pressed="false">' + nm + '</button>').join('') + '</div>', hint('至少留一种；默认的那种关掉了，学生页先选开着的第一种')) + '</section>' : '') +
+      (has36() ? '<section class="box" id="bxRetest"><h2>整卷再做一遍 <small>正式测验交卷以后，整张卷子原题当练习再做一遍；不算成绩、不进错词本。保存后马上生效</small></h2>' +
+        fld('retestN', '最近交卷的几场可以整卷再做', stepHTML('retestN'), hint('0＝不开放；按交卷时间往前数')) + '</section>' : '') +
+      (has36() ? '<section class="box" id="bxShow"><h2>题目上方的档和难度星级 <small>测验、练习、刷题三处都按这一项；保存后马上生效</small></h2>' +
+        fld('starShow', '题目上方显示档和难度星级', sw('starShow', '题目上方显示档和难度星级'), hint('例如「N3 ★★★★」：星级是同一档里比，1 星最容易。关掉＝三处都不显示，刷题页也不再有「按难度」筛选（不管开不开刷题都能改）')) + '</section>' : '') +
+      (has36() ? '<section class="box" id="bxStar"' + (scope === 'global' ? '' : ' hidden') + '><h2>题目难度星级 <small>题目本身的规则，只在这里改</small></h2>' +
+        fld('starAuto', '按真实答对率自动修正星级', sw('starAuto', '按真实答对率自动修正星级'), hint('关着＝一直用初始星级（Codex 逐题打的星）')) +
+        fld('starN', '一道题有效作答多少次以后开始修正', stepHTML('starN'), hint('每个学生只算第一次作答（测验、练习、刷题都算）。这个数也是初始星级的分量：现在的星＝（初始星×这个数＋按答对率排的星×作答数）÷（这个数＋作答数），答的人越多越靠真实答对率')) +
+        fld('starMinQ', '同一档至少几道够数的题才排位', stepHTML('starMinQ'), hint('够数的题在同一档里按答对率排：答对率最高的 10%＝1 星、接着 25%＝2 星、30%＝3 星、25%＝4 星、最难的 10%＝5 星（答对率一样的取中间名次；全都一样就不排）')) +
+        '<div class="note">这几项保存后马上重算一次；平时每天第一次打开管理端时也重算一次。哪些题的星级变了，在顶上的「题目难度」页看（那里也能马上重算）。</div></section>' : '') +
       '<section class="box" id="bxEx"' + (scope === 'global' ? '' : ' hidden') + '><h2>拓展例句 <small>卡片背面的知识例句、时事例句，学生点了才生成</small></h2>' +
       fld('exOn', '拓展例句', sw('exOn', '拓展例句'), hint('关着＝学生页不再生成，也不给已有的句子')) +
       fld('exWhoK', '知识例句用哪家', seg('c-exWhoK', '知识例句用哪家', [['anthropic', '只用 Claude'], ['openai', '只用 OpenAI'], ['both', '两家轮流'], ['off', '关闭']]), hint('关闭＝学生页不显示「知识例句」按钮（管理端试生成照样能用）')) +
@@ -663,8 +761,8 @@ const Adm = (() => {
       fld('exNewsWin', '只用多少天内的新闻', stepHTML('exNewsWin')) + fld('exNoMatchDays', '找不到合适新闻后，隔几天再搜', stepHTML('exNoMatchDays')) +
       fld('exDomains', '时事新闻只搜这些网站', '<textarea id="f-exDomains" rows="6" spellcheck="false" aria-label="新闻只搜哪些网站"></textarea>', hint('每行一个，最多 20 个，例如 nhk.or.jp（不写 https:// 和路径）')) +
       '<div class="note">每月预算、价格、用量、学生报错、试生成在顶上的「拓展例句」页。</div></section>';
-    // 方案只管「各档怎么学」：别的块都不显示（元素留着，页面的其他计算照常）
-    if (scope === 'tpl') h = h.replace(/<section class="box"(?! id="bxLv")/g, '<section class="box" hidden');
+    // 方案只管「各档怎么学」和刷题：别的块都不显示（元素留着，页面的其他计算照常）
+    if (scope === 'tpl') h = h.replace(/<section class="box"(?! id="bx(?:Lv|Drill|Show|Retest)")/g, '<section class="box" hidden');   // 第 36 步起方案也管刷题、题目上方显示档和星级、整卷再做
     return h;
   }
   function saveBar() { return '<div class="savebar"><div class="wrap"><div class="st" id="dirty" role="status">没有改动</div><div style="display:flex;gap:8px"><button type="button" class="btn" id="discard" disabled>放弃改动</button><button type="button" class="btn main" id="save" disabled>保存</button></div></div></div>'; }
@@ -697,6 +795,9 @@ const Adm = (() => {
     if (k === 'merge') return v === 'merge' ? '合成一场' : '分开考';
     if (k === 'exWhoK' || k === 'exWhoN') return WHO[v] || String(v);
     if (k === 'exDomains') return Array.isArray(v) ? v.join('、') : String(v);
+    if (k === 'drillScopes') return DSC.filter(([t]) => scOn(v, t)).map(([, nm]) => nm).join('、') || '（无）';
+    if (k === 'drillOrders') return DORD.filter(([t]) => scOn(v, t)).map(([, nm]) => nm).join('、') || '（无）';
+    if (k === 'drillOrder') return (DORD.find(([t]) => t === v) || [, String(v)])[1];
     return String(v);
   }
   function changes() {
@@ -732,7 +833,7 @@ const Adm = (() => {
   function whoTxt() {
     const t = TPL(), s = stuOf(stuKey);
     const nm = scope === 'global' ? '所有学生的默认' : scope === 'tpl' ? '方案「' + t[tplKey] + '」' : (s ? s.name : '');
-    $('who').innerHTML = '正在改：<b>' + esc(nm) + '</b>' + (scope === 'global' ? '（每个学生的起点；方案只管各档怎么学）' : scope === 'tpl' ? '（用这个方案的学生，共 ' + D.students.filter(x => x.plan === tplKey).length + ' 人；方案只管各档怎么学）' : '（只影响这一个学生）');
+    $('who').innerHTML = '正在改：<b>' + esc(nm) + '</b>' + (scope === 'global' ? '（每个学生的起点；方案只管各档怎么学' + (has36() ? '和刷题' : '') + '）' : scope === 'tpl' ? '（用这个方案的学生，共 ' + D.students.filter(x => x.plan === tplKey).length + ' 人；方案只管各档怎么学' + (has36() ? '和刷题' : '') + '）' : '（只影响这一个学生）');
     $('sumWho').textContent = scope === 'stu' ? (s ? s.name : '') + ' 的情况' : scope === 'tpl' ? '用「' + t[tplKey] + '」的学生' : '所有学生的默认';
   }
   // 这一层设置在数据库里的版本号（保存时带上，别人刚改过会被拦下）
@@ -765,7 +866,9 @@ const Adm = (() => {
     $('c-types').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', typeOn(e.types, x.dataset.v) ? 'true' : 'false'));
     $('c-whyT').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', whyOn(e.whyT, x.dataset.v) ? 'true' : 'false'));
     if (scope === 'stu') $('c-tplOf').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x.dataset.v === draft.tpl ? 'true' : 'false'));
-    SW.forEach(k => $('f-' + k).setAttribute('aria-checked', e[k] ? 'true' : 'false'));
+    SW.forEach(k => { const el = $('f-' + k); if (el) el.setAttribute('aria-checked', e[k] ? 'true' : 'false'); });   // 旧数据库没有刷题的开关：那几个不画
+    const cds = $('c-drillScopes'); if (cds) cds.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', scOn(e.drillScopes, x.dataset.v) ? 'true' : 'false'));
+    const cdo = $('c-drillOrders'); if (cdo) cdo.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', scOn(e.drillOrders, x.dataset.v) ? 'true' : 'false'));
     for (const k in D.global) {
       const el = $('i-' + k); if (!el) continue;
       let h = '';
@@ -800,6 +903,7 @@ const Adm = (() => {
     $('totalTxt').innerHTML = t + '<br>学生详情里设了「下周新词数」的那一周：新词按设的数，上周的错词全部带上（不管这里选哪个）。';
     $('revOff').textContent = e.revW === 0 ? '现在没有回顾周，下面的设置不起作用' : '';
     lockBox('bxRev', e.revW === 0); lockBox('bxSrs', !e.srsOn, 'srsOn'); lockBox('bxQ', !e.qOn, 'qOn'); lockBox('bxY', !e.yOn, 'yOn');
+    lockBox('bxDrill', !e.drillOn, 'drillOn'); lockBox('bxStar', !e.starAuto, 'starAuto');
     const fa = $('fd-addN'); fa.classList.toggle('dim', !e.addOn); fa.querySelectorAll('input,button').forEach(x => x.disabled = !e.addOn);
     const fw = $('fd-whyT'); fw.classList.toggle('dim', !e.instant); fw.querySelectorAll('.ck').forEach(x => x.disabled = !e.instant);
     const P = plan(e), T = P.length, q = Math.floor(e.weekly / e.days), r = e.weekly % e.days;
@@ -822,6 +926,8 @@ const Adm = (() => {
     savingCfg = true; busy(btn, true);
     const items = ch.map(([k, a, b]) => LAB[k] + '：' + a + ' → ' + b);
     const ver = draftVer;
+    // 保存前后这一层（单个学生：这个学生实际用的设置，换方案带来的变化也算）哪些项变了：提示里写生效时间用
+    const L0 = layer(), effOld = scope === 'global' ? clone(D.global) : Object.assign(base(scope === 'stu' ? L0.tpl : undefined), clone(scope === 'stu' ? L0.ov : L0)), effNew = clone(eff());
     try {
       if (scope === 'global') await rpc('adm_save_cfg', { scope, target: '', d: draft, pl: null, items, ver });
       else if (scope === 'tpl') await rpc('adm_save_cfg', { scope, target: tplKey, d: draft, pl: null, items, ver });
@@ -831,7 +937,16 @@ const Adm = (() => {
       else if (scope === 'tpl') { const p = D.plans.find(x => x.key === tplKey); if (p) { p.ov = clone(draft); p.ver = ver + 1; } }
       else { const s = stuOf(stuKey); if (s) { s.ov = clone(draft.ov); s.plan = draft.tpl; s.ver = ver + 1; } }
       draft = null; savingCfg = false;
-      toast('已保存：已经开始的这一周照旧，各学生从下一周起用新设置');
+      // 按这次实际改的项写生效时间：刷题、星级、拓展例句的设置马上生效（星级规则改了马上重算）；其他从各学生的下一周起
+      const NOW = ['drillOn', 'drillScopes', 'drillMax', 'drillPer', 'drillOrder', 'drillOrders', 'starShow', 'retestN', 'starAuto', 'starN', 'starMinQ'], isNow = k => NOW.includes(k) || /^ex/.test(k);
+      const keys = [...new Set([...Object.keys(effOld || {}), ...Object.keys(effNew || {})])].filter(k => !same((effOld || {})[k], (effNew || {})[k]));
+      const nNow = keys.filter(isNow).length, nAll = keys.length, star = keys.some(k => ['starAuto', 'starN', 'starMinQ'].includes(k));
+      // 混着改时把马上生效的项全部点名（按设置页上的先后；4 项以上分行写，提示多停一会儿）
+      const LK = Object.keys(LAB), nowNames = keys.filter(isNow).sort((a, b) => (LK.indexOf(a) + 1 || 999) - (LK.indexOf(b) + 1 || 999)).map(k => LAB[k] || k), many = nowNames.length > 3, REST = '其他的已经开始的这一周照旧，各学生从下一周起用新设置';
+      toast('已保存：' + (nAll && nNow === nAll ? '马上生效' + (star ? '，题目星级已经按新规则重算' : '')
+        : !nNow ? '已经开始的这一周照旧，各学生从下一周起用新设置'
+        : many ? '下面 ' + nNow + ' 项马上生效' + (star ? '（星级已重算）' : '') + '：\n' + nowNames.join('、') + '\n' + REST
+        : nowNames.join('、') + ' 马上生效' + (star ? '（星级已重算）' : '') + '；' + REST), many ? 8000 : undefined);
       if (!(await reload())) toast('已保存，但重新读取没成功，刷新页面看看');
     } catch (e) {
       savingCfg = false;
@@ -850,7 +965,8 @@ const Adm = (() => {
     if (!D || $('app').dataset.role !== 'adm' || e.target.closest('.modal')) return;
     const t = e.target;
     if (t.closest('button:disabled')) return;
-    const at = t.closest('[data-atab]'); if (at) { if (at.dataset.atab === tab || guard()) return; tab = at.dataset.atab; draft = null; if (tab === 'ex') EXA = null; render(); return; }
+    const at = t.closest('[data-atab]'); if (at) { if (at.dataset.atab === tab || guard()) return; tab = at.dataset.atab; draft = null; if (tab === 'ex') EXA = null; if (tab === 'qs') QS = null; render(); return; }
+    if (tab === 'qs') { const qa = t.closest('[data-qa]'); if (qa) { qsAct(qa); return; } }
     if (tab === 'ex') {
       const xa = t.closest('[data-xa]'); if (xa) { exaAct(xa); return; }
       const xs = t.closest('#xtk button[data-v], #xtp button[data-v]'); if (xs) { if (xs.parentElement.id === 'xtk') exT.kind = xs.dataset.v; else exT.prov = xs.dataset.v; exT.res = null; render(); return; }
@@ -889,6 +1005,8 @@ const Adm = (() => {
       const id = ck.parentElement.id, v = ck.dataset.v, cur = eff();
       if (id === 'c-only') { let a = (cur.only || []).slice(); a = a.includes(v) ? a.filter(x => x !== v) : LV.filter(l => a.includes(l) || l === v); if (!a.length) { toast('至少要学一档'); return; } setVal('only', a); }
       else if (id === 'c-whyT') { const o = {}; WHY.forEach(([t]) => o[t] = whyOn(cur.whyT, t)); o[v] = !o[v]; setVal('whyT', o); }
+      else if (id === 'c-drillOrders') { const o = {}; DORD.forEach(([t]) => o[t] = scOn(cur.drillOrders, t)); o[v] = !o[v]; if (!DORD.some(([t]) => o[t])) { toast('出题方式至少留一种'); return; } setVal('drillOrders', o); }
+      else if (id === 'c-drillScopes') { const o = {}; DSC.forEach(([t]) => o[t] = scOn(cur.drillScopes, t)); o[v] = !o[v]; if (!DSC.some(([t]) => o[t])) { toast('至少留一项；不想让学生刷题，请关掉「开放刷题」'); return; } setVal('drillScopes', o); }
       else { const o = {}; TYPES.forEach(([t]) => o[t] = typeOn(cur.types, t)); o[v] = !o[v]; if (!TYPES.some(([t]) => o[t])) { toast('至少要留一种题型'); return; } setVal('types', o); }
       return;
     }

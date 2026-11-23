@@ -198,7 +198,7 @@ table.t th{color:var(--muted);font-weight:400;font-size:12px;border-top:0}
 .modal{position:fixed;inset:0;z-index:30;background:rgba(10,14,20,.45);display:flex;align-items:flex-end;justify-content:center;padding:16px}
 .modal .card{width:100%;max-width:520px;max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);overflow:auto}
 @media (min-width:700px){.modal{align-items:center}}
-.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);font-size:13px;padding:8px 14px;border-radius:8px;z-index:40;max-width:calc(100% - 32px)}
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);font-size:13px;padding:8px 14px;border-radius:8px;z-index:40;width:max-content;max-width:calc(100% - 32px);white-space:pre-line}
 @media (max-width:440px){.stat b{font-size:18px}.weeks{gap:2px}.wk{font-size:10px}}
 @media (prefers-reduced-motion:no-preference){.card{animation:fade .18s ease-out}@keyframes fade{from{opacity:.5}to{opacity:1}}}
 .link.danger{color:var(--bad)}
@@ -290,3 +290,40 @@ table.t th{color:var(--muted);font-weight:400;font-size:12px;border-top:0}
 .fbar{border-color:var(--bad,#c33)}
 .fxp{font-size:13px;line-height:1.7}
 .fxp>div+div{margin-top:4px}
+
+/* 第 36 步：题目上方的档和难度星级、刷题页、管理端题目难度页 */
+.qlv{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);line-height:1.4}
+.qlv .lvb{font-weight:500;color:var(--ai);background:var(--ai-soft);border-radius:6px;padding:1px 8px;font-variant-numeric:tabular-nums}
+.qlv .stars{color:var(--warn);letter-spacing:1px;font-size:14px}.qlv .stars .off{color:var(--unlit)}
+.dnote{line-height:1.7}
+.drill h2+.dscs{margin-top:2px}
+.dscs{display:grid;gap:8px}
+.dsc{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:48px;padding:9px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);cursor:pointer;text-align:left;font-size:15px}
+.dsc>span:first-child{display:flex;flex-direction:column;min-width:0}
+.dsc b{font-weight:500}.dsc small{font-size:12px;color:var(--muted)}
+.dsc .n{font-size:13px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.dsc[aria-pressed="true"]{border-color:var(--ai);background:var(--ai-soft);color:var(--ai)}
+.dsc[aria-pressed="true"] .n,.dsc[aria-pressed="true"] small{color:var(--ai)}
+.dsc:disabled{opacity:.5;cursor:default}
+.drill h2{margin-top:10px}
+.dfl{display:flex;flex-direction:column;gap:6px;padding-block:4px}
+.dfl .lab{font-size:13px;color:var(--muted)}.dfl .lab small{font-size:12px}
+.drill .ck{min-height:40px;min-width:44px}
+.drill .ck.dst{color:var(--warn);letter-spacing:1px}
+.drill .ck.dst[aria-pressed="true"]{color:var(--warn);background:var(--warn-bg);border-color:var(--warn)}
+.dnum{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.dcus{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+.dcus input{width:96px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font-size:16px}
+#dcnt{min-height:1.6em;margin-top:4px}#dcnt b{color:var(--ink)}#dcnt .bad{color:var(--bad)}
+.dgo{width:100%;margin-top:6px}
+.dords{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:6px}
+.dords .dord{display:flex;flex-direction:column;align-items:flex-start;gap:0;text-align:left;padding:8px 10px}
+.dords .dord b{font-weight:500;font-size:14px}.dords .dord small{font-size:11px;color:var(--muted)}
+.dords .dord[aria-pressed="true"] small{color:var(--ai)}
+.dbar{position:sticky;bottom:0;z-index:2;background:var(--surface);border-top:1px solid var(--line);margin:6px -16px -14px;padding:8px 16px calc(10px + env(safe-area-inset-bottom,0px));border-radius:0 0 16px 16px}
+.dst-t td,.dst-t th{white-space:nowrap}
+.qsl .it{display:block}.qsl .qq{font-family:var(--jp);font-size:14px;color:var(--muted);overflow-wrap:anywhere}
+.qsd{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:3px;font-size:12px;font-variant-numeric:tabular-nums;text-align:center}
+.qsd span{background:var(--bg);border-radius:6px;padding:2px 0}
+.qst td:nth-child(3){min-width:180px;white-space:normal}
+.qsl select{max-width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink)}

@@ -17,6 +17,9 @@ const Stu = (() => {
   let T = null, ans = [], qi = 0;                                      // 进行中的测验
   // 进行中的练习（练本次错题、再练一遍错的、组后小练）：不算成绩、不改错词本。PR = {id, items, res 每题的结果, qi, sel, busy, title, back 练完回哪个页签}
   let PR = null, prStarting = false, prSeq = 0, prPend = null;
+  // 刷题页（第 36 步）：DS = {opts 服务器给的能选什么, err 没读到, scope 刷哪些词, lv/t/st 再筛（Set，空＝不筛）, n 选的题数, custom 自己填的, cnt 符合条件有几题}
+  // dSeq：读取能选什么的请求编号；dcSeq：数「符合条件有几题」的请求编号（后发的才算数）
+  let DS = null, dSeq = 0, dcSeq = 0, dcTimer = 0, dLoading = false;
   // 当场判对错：res 服务器给的结果；srv 服务器上已经记下的题；pend 没收到确认的题 → 当时选的选项（网络断了、回复丢了，不知道记没记下）；
   // answering / fetching：正在等回复的那一次请求（带请求编号，旧请求回来时先核对，免得打乱后来的请求）
   let instant = false, res = [], srv = new Set(), pend = new Map(), answering = null, fetching = null, fetchBad = new Set(), reqNo = 0, checking = false, syncBad = false;
@@ -63,7 +66,7 @@ const Stu = (() => {
     D = d; stale = null; lastSync = Date.now();
     exSetKinds(d.ex || null);   // 拓展例句哪几类开着（第 34 步起学生页读取会给）：所有卡片同步
   }
-  function start(d) { apply(d); resetQueue(); render(); flushMarks(); }   // 上次没确认的打卡：打开页面就补
+  function start(d) { apply(d); resetQueue(); render(); flushMarks(); seenRetry(); }   // 上次没确认的打卡、没报上的「看过」：打开页面就补
   // 读取一次：比后面发出的请求还晚回来的、比页面上已经显示的日期或周还旧的，都不用（返回 null）
   const behind = d => !!(D && D.week && d.week && (d.week.today < D.week.today || (d.week.today === D.week.today && d.week.no < D.week.no)));
   async function load() {
@@ -107,12 +110,12 @@ const Stu = (() => {
     // 同一天：别的设备可能学过。词单没变就只更新每张卡的状态，正在学的这一轮顺序不打乱
     const ids = x => (x.cards || []).map(c => c.id).join();
     if (ids(d) !== ids(D) || mode === 'rev') {
-      if (T || (tab === 'study' && flipped)) { ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'myplan', 'plans', 'req', 'ex'].forEach(k => D[k] = d[k]); exSetKinds(d.ex || null); lastSync = Date.now(); return; }
+      if (T || (tab === 'study' && flipped)) { ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'myplan', 'plans', 'req', 'ex', 'drill'].forEach(k => D[k] = d[k]); exSetKinds(d.ex || null); lastSync = Date.now(); return; }
       apply(d); resetQueue(); render(); return;
     }
     const by = Object.fromEntries(d.cards.map(c => [c.id, c]));
     cards().forEach(c => { const n = by[c.id]; if (n) Object.assign(c, { st: n.st, done: n.done, again: n.again, wrong: n.wrong }); });
-    ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'review', 'week', 'myplan', 'plans', 'req', 'ex'].forEach(k => D[k] = d[k]);
+    ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'review', 'week', 'myplan', 'plans', 'req', 'ex', 'drill'].forEach(k => D[k] = d[k]);
     exSetKinds(d.ex || null);   // 同一天的局部重读也带上新的开关状态
     lastSync = Date.now();
     // 从列表里点过来、排在最前面的那张卡（可能已经练过）留在最前面
@@ -133,7 +136,7 @@ const Stu = (() => {
 
   function header() {
     const w = D.week, L = w.kind === 'L', tot = cards().length, done = doneN(), en = errN();
-    const tabs = [['study', '学习'], ['test', '测验'], ['err', '错词本'], ['map', '进度']];
+    const tabs = [['study', '学习'], ['test', '测验'], ...(drillOn() || tab === 'drill' ? [['drill', '刷题']] : []), ['err', '错词本'], ['map', '进度']];
     return '<header class="top"><div class="wrap">' +
       '<div class="row"><div class="brand"><b>' + esc(D.me.name) + '</b><span>第 ' + w.no + ' 周 · ' + (L ? '学新词' : '回顾周') + ' · ' + md(w.start) + '～' + md(w.end) + (w.extended ? '（已延长）' : '') + '</span></div>' + (D.stats ? '<span class="chip' + (D.stats.streak ? ' ok' : '') + '">连续 ' + D.stats.streak + ' 天</span>' : '') + '</div>' +
       '<div class="seg" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k) + '">' + n + (k === 'err' && en ? ' ' + en : '') + '</button>').join('') + '</div>' +
@@ -147,11 +150,39 @@ const Stu = (() => {
     if (PR) body = pracHTML();
     else if (tab === 'study') body = studyHTML();
     else if (tab === 'test') body = testHTML();
+    else if (tab === 'drill') body = drillHTML();
     else if (tab === 'err') body = errHTML();
     else body = mapHTML();
     $('app').innerHTML = header() + '<main class="wrap">' + (stale ? '<div class="warnbox">' + esc(stale) + ' <button class="gbtn" data-act="reload">重新读取</button></div>' : '') + body + '</main>';
     if (tab === 'test' && T && instant) needRes();
+    if (PR) prSeen();
   }
+  // 练习、刷题翻到第 i 题：告诉服务器「学生看过这道题了」（周测优先出没见过的题型）。第 1 题服务器出题时已经记了；
+  // 没报上（断网）的下次显示这一题时再报；不算作答、不进刷题统计
+  // 没报上的记在 seenQ（练习编号|题号），网络恢复、下次画页面时补报；按练习编号＋题号去重。
+  // 发送以前就先存进这个浏览器（名字按学生链接算的摘要，不存钥匙；只存练习编号＋题号，最多 200 条）：网卡住时马上关掉页面也不会漏，再打开会接着补报。
+  // 报上了、或者服务器明确拒绝了，只删这一条（每次都重新读浏览器里存的再改，同一个学生开着几个标签页也不会互相清掉）。存不进浏览器就只记在页面里
+  const PSEEN = 'vocab_seenq_' + PMK.slice(12);
+  const seenQ = new Map(), seenOk = new Set(), seenTry = new Set();
+  const seenLS = () => { try { const v = JSON.parse(localStorage.getItem(PSEEN) || '[]'); return Array.isArray(v) ? v.filter(x => Array.isArray(x) && typeof x[0] === 'string' && Number.isInteger(x[1])) : []; } catch (e) { return []; } };
+  const seenPut = (pid, i) => { try { const v = seenLS(); if (!v.some(x => x[0] === pid && x[1] === i)) { v.push([pid, i]); localStorage.setItem(PSEEN, JSON.stringify(v.slice(-200))); } } catch (e) {} };
+  const seenDel = (pid, i) => { try { const v = seenLS().filter(x => !(x[0] === pid && x[1] === i)); if (v.length) localStorage.setItem(PSEEN, JSON.stringify(v)); else localStorage.removeItem(PSEEN); } catch (e) {} };
+  function seenSend(pid, i) {
+    const key = pid + '|' + i;
+    if (seenOk.has(key) || seenTry.has(key)) return;
+    seenTry.add(key); seenQ.set(key, [pid, i]); seenPut(pid, i);   // 先记下（页面里＋浏览器里），报上了再删
+    rpc('stu_practice', { act: 'seen', a: { pid, i } }, { obj: true, timeout: 15000 })
+      .then(r => { if (r && (r.state === 'ok' || r.state === 'off')) { seenOk.add(key); seenQ.delete(key); seenDel(pid, i); } },
+            e => { if (e && e.status >= 400 && e.status < 500) { seenQ.delete(key); seenDel(pid, i); } })   // 服务器明确拒绝（练习没了、题号不对）就不再补；其他（断网、超时）留着下次补
+      .finally(() => seenTry.delete(key));
+  }
+  // 补报：页面里记的＋浏览器里存的（可能是别的标签页、或者上次关掉的页面留下的）
+  function seenRetry() { for (const [pid, i] of seenLS()) seenQ.set(pid + '|' + i, [pid, i]); for (const [pid, i] of [...seenQ.values()]) seenSend(pid, i); }
+  function prSeen() {
+    if (PR && !PR.ended && PR.qi > 0 && PR.qi < PR.items.length) seenSend(PR.id, PR.qi);
+    seenRetry();
+  }
+  window.addEventListener('online', () => { if ($('app').dataset.role !== 'adm') seenRetry(); });
 
   // ── 学习 ──
   // 三个数字各指什么：本周词单（新词＋上周错词＋追加）、每个学习日大约学几个、今天先复习几个
@@ -417,7 +448,8 @@ const Stu = (() => {
           '<div class="stat"><b>' + (x.total ? Math.floor(x.score * 100 / x.total) : 0) + '%</b><span>正确率</span></div>' +
           '<div class="stat"><b>' + (x.passed ? '及格' : x.manual ? '老师放行' : '没及格') + '</b><span>结果</span></div></div>' +
           ((x.parts || []).includes('week') && !(x.passed || x.manual) ? '<div class="muted">错的词会按老师的设置带到下一周再学。</div>' : '') +
-          (x.id && num(x.total) > num(x.score) ? '<div><button class="btn" data-act="ptest" data-tid="' + esc(x.id) + '">练本次错题（' + (num(x.total) - num(x.score)) + ' 题）</button> <span class="small muted">不算成绩</span></div>' : '') + '</div>';
+          (x.id && num(x.total) > num(x.score) ? '<div><button class="btn" data-act="ptest" data-tid="' + esc(x.id) + '">练本次错题（' + (num(x.total) - num(x.score)) + ' 题）</button> <span class="small muted">不算成绩</span></div>' : '') +
+          (x.id && x.redo ? '<div><button class="btn" data-act="pretest" data-tid="' + esc(x.id) + '">整卷再做一遍（' + num(x.total) + ' 题）</button> <span class="small muted">原题再做，不算成绩</span></div>' : '') + '</div>';
       } else {
         const before = list.slice(0, i).some(y => !y.done);
         h += '<div class="card"><h2>' + tName(x) + '</h2><div class="muted tdesc">' + tDesc(x) + '</div>' +
@@ -429,8 +461,9 @@ const Stu = (() => {
       h += '<div class="box"><h2>以前的成绩</h2><div class="scroll"><table class="t"><tr><th>周</th><th>类型</th><th>成绩</th><th>结果</th></tr>' +
         D.history.map(x => '<tr><td>第 ' + num(x.no) + ' 周</td><td>' + esc(KN[x.kind] || x.kind) + '</td><td>' + (x.total ? num(x.score) + ' / ' + num(x.total) : '没考') + '</td><td>' +
           (x.total ? (x.passed ? '<span class="chip ok">及格</span>' : x.manual ? '<span class="chip">放行</span>' : '<span class="chip bad">没及格</span>') : '—') +
-          (x.prac && x.id && num(x.total) > num(x.score) ? ' <button type="button" class="link" data-act="ptest" data-tid="' + esc(x.id) + '">练错题</button>' : '') + '</td></tr>').join('') + '</table></div>' +
-        '<div class="small muted">「练错题」：拿那场错的词换一道题再练，不算成绩、不改错词本（最近交卷的 5 场可以练）。</div></div>';
+          (x.prac && x.id && num(x.total) > num(x.score) ? ' <button type="button" class="link" data-act="ptest" data-tid="' + esc(x.id) + '">练错题</button>' : '') +
+          (x.redo && x.id && num(x.total) ? ' <button type="button" class="link" data-act="pretest" data-tid="' + esc(x.id) + '">整卷再做</button>' : '') + '</td></tr>').join('') + '</table></div>' +
+        '<div class="small muted">「练错题」：拿那场错的词换一道题再练（最近交卷的 5 场可以练）。' + (D.drill && num(D.drill.retest) ? '「整卷再做」：整张卷子原题再做一遍（最近交卷的 ' + num(D.drill.retest) + ' 场可以做）。' : '') + '都不算成绩、不改错词本。</div></div>';
     }
     return h;
   }
@@ -441,6 +474,7 @@ const Stu = (() => {
       const r = await rpc('stu_test_start', { kd: btn.dataset.kd || null, cv: CV }, { obj: true });
       if (!r.id || !Array.isArray(r.items) || !r.items.length || !r.items.every(i => i && Array.isArray(i.o) && i.o.length >= 2)) throw new Error('试卷没有读出来，请刷新页面再试');
       T = r; T.week = r.week_id || D.week.id;   // 这张卷属于哪一周（页面还停在上周时，以卷为准）
+      syncStar(r);
       const x = (D.tests || []).find(y => y.kind === T.kind); if (x) { x.started = true; x.id = T.id; x.n = T.items.length; }
       const n = T.items.length;
       instant = r.instant === true;
@@ -472,8 +506,16 @@ const Stu = (() => {
   const optHTML = (it, o) => isJ(it.t) ? rb(o) : esc(o);
   const jpOpt = t => t !== 'jc';
   // rs：当场判过的结果（选的标红/绿、正确的标绿）；lock：这题的选项不能再点
+  // 题目上方的「N3 ★★★★」（第 36 步：测验、练习、刷题都有；老师关了「显示档和难度星级」就不显示——服务器那时根本不给档和星；旧数据库没给就不显示）
+  const starOn = () => !(D && D.drill && D.drill.star === false);
+  const syncStar = r => { if (r && typeof r.star === 'boolean' && D && D.drill) D.drill.star = r.star; };   // 出题、开考、刷题页的回复带着现在的设置
+  function badge(it) {
+    if (!it || !it.lv || !LV.includes(it.lv) || !starOn()) return '';
+    const s = Number.isInteger(it.st) && it.st >= 1 && it.st <= 5 ? it.st : 0;
+    return '<div class="qlv"><span class="lvb">' + esc(it.lv) + '</span>' + (s ? '<span class="stars" role="img" aria-label="难度 ' + s + ' 星（满 5 星，同一档里比）">' + '★'.repeat(s) + '<span class="off">' + '★'.repeat(5 - s) + '</span></span>' : '') + '</div>';
+  }
   function qBody(it, sel, rs, lock) {
-    return '<div class="muted">' + qText(it) + '</div>' + stemHTML(it) +
+    return badge(it) + '<div class="muted">' + qText(it) + '</div>' + stemHTML(it) +
       '<div class="opts' + (it.t === 'yoho' ? ' long' : '') + (rs ? ' judged' : '') + '" role="group" aria-label="选项">' + it.o.map((o, j) => {
         let cls = 'opt' + (jpOpt(it.t) ? ' jpo' : ''), no = String(j + 1), say = '';
         if (rs) { if (j === rs.a) { cls += ' right'; no = '✓'; say = '（正确答案）'; } else if (j === rs.mine) { cls += ' wrong'; no = '✗'; say = '（你选的，错了）'; } }
@@ -642,9 +684,11 @@ const Stu = (() => {
     const tot = num(r.total), sc = num(r.score), pct = tot ? Math.floor(sc * 100 / tot) : 0, wr = r.wrong || [];
     const m = modal('<h2>' + (r.passed ? '及格了！' : '这次没及格') + '</h2><div class="stats"><div class="stat"><b>' + sc + ' / ' + tot + '</b><span>答对</span></div><div class="stat"><b>' + pct + '%</b><span>正确率</span></div><div class="stat"><b>' + num(r.pass, 95) + '%</b><span>及格线</span></div></div>' +
       (wr.length && tid ? '<div class="form"><button class="btn main" id="rpr">练本次错题（' + wr.length + ' 个）</button><span class="small muted">换一道题再练，当场判对错；不算成绩、不改错词本</span></div>' : '') +
+      (tid && D.drill && num(D.drill.retest) ? '<div class="form"><button class="btn" id="rrt">整卷再做一遍（' + tot + ' 题）</button><span class="small muted">整张卷子原题再做，当场判对错、有解析；不算成绩</span></div>' : '') +
       (wr.length ? '<div class="lab">答错的 ' + wr.length + ' 个（已放进错词本），下面是每道错题的解析</div>' + reviewHTML(r) : '<div class="muted">全部答对了。</div>') +
       '<button class="btn' + (wr.length && tid ? '' : ' main') + '" data-close>好的</button>');
     const b = m.querySelector('#rpr'); if (b) b.addEventListener('click', () => { m.close(); pStart({ tid }, '练本次错题', 'test'); });
+    const b2 = m.querySelector('#rrt'); if (b2) b2.addEventListener('click', () => { m.close(); pStart({ rid: tid }, '整卷再做一遍', 'test'); });
   }
 
   // ── 练习（练本次错题、再练一遍错的、组后小练）：当场判对错、显示解析；不算成绩、不改错词本、不改本周练过数 ──
@@ -668,28 +712,29 @@ const Stu = (() => {
     let r; try { r = await rpc('stu_practice', { act: 'start', a: Object.assign({ req }, a) }, { obj: true }); }
     catch (e) { if (my !== prSeq) return; prStarting = false; if (e.status >= 400 && e.status < 500) prPend = null; fail(e); return; }   // 服务器明确拒绝才换新编号；网络断了、服务器出错（不知道建没建）下次沿用同一个编号
     if (my !== prSeq) return;                        // 等的时候已经切到别的页签或退出了：不再拉回练习
-    prStarting = false; prPend = null;
+    prStarting = false; prPend = null; syncStar(r);
     if (r && r.state === 'exam') { toast(r.msg || '先交卷，再继续练习'); return; }
     if (!r || r.state !== 'ok' || !Array.isArray(r.items) || !r.items.length) { toast((r && r.msg) || '没有要练的词'); return; }
     PR = { id: r.id, items: r.items, res: new Array(r.items.length).fill(null), qi: 0, sel: null, busy: false, title, back: back || tab,
-           tid: a.tid, part: num(r.part), more: num(r.more) };
+           tid: a.tid, rid: a.rid, part: num(r.part), more: num(r.more) };
     tab = PR.back; render(); window.scrollTo({ top: 0 });
   }
   function pracHTML() {
     const n = PR.items.length;
+    if (PR.kind === 'drill') return drillRunHTML();
     if (PR.qi >= n) {
       const done = PR.res.filter(Boolean).length, right = PR.res.filter(x => x && x.ok).length;
       return '<div class="card"><h2>练完了</h2><div class="stats"><div class="stat"><b>' + done + '</b><span>这次练了</span></div><div class="stat"><b>' + right + '</b><span>答对</span></div></div>' +
         '<div class="muted">练习不算成绩，也不改错词本的次数。</div><div class="form">' +
         (done > right ? '<button class="btn main" data-act="pagain">再练一遍错的（' + (done - right) + ' 个）</button>' : '') +
-        (PR.more ? '<button class="btn' + (done > right ? '' : ' main') + '" data-act="pmore">接着练下一组（还有 ' + PR.more + ' 个）</button>' : '') +
+        (PR.more ? '<button class="btn' + (done > right ? '' : ' main') + '" data-act="pmore">' + (PR.rid ? '接着做下一组（还有 ' + PR.more + ' 题）' : '接着练下一组（还有 ' + PR.more + ' 个）') + '</button>' : '') +
         '<button class="btn' + (done > right || PR.more ? '' : ' main') + '" data-act="pexit">返回</button></div></div>';
     }
     const it = PR.items[PR.qi], rs = PR.res[PR.qi];
     const vd = rs ? '<div class="vd ' + (rs.ok ? 'ok' : 'bad') + '" role="status">' + (rs.ok ? '答对了' : '答错了，正确答案是第 ' + (rs.a + 1) + ' 个') + '</div>' + (rs.why ? '<div class="why">' + esc(rs.why) + '</div>' : '')
       : PR.busy ? '<div class="vd muted" role="status">正在判……</div>' : '<div class="small muted">选了马上告诉你对不对</div>';
     return '<div class="wkline"><span class="muted">' + esc(PR.title) + (PR.more || PR.part ? '（第 ' + (PR.part + 1) + ' 组）' : '') + ' · 第 ' + (PR.qi + 1) + ' / ' + n + ' 题 · 不算成绩</span><button type="button" class="gbtn" data-act="pexit">结束练习</button></div>' +
-      (PR.more && PR.qi === 0 ? '<div class="small muted">错的词比较多：本次 ' + n + ' 个，还有 ' + PR.more + ' 个，练完可以接着练下一组。</div>' : '') +
+      (PR.more && PR.qi === 0 ? '<div class="small muted">' + (PR.rid ? '这张卷题比较多：这一组 ' + n + ' 题，还有 ' + PR.more + ' 题，做完可以接着做下一组。' : '错的词比较多：本次 ' + n + ' 个，还有 ' + PR.more + ' 个，练完可以接着练下一组。') + '</div>' : '') +
       '<div class="card">' + qBody(it, PR.sel, rs, !!rs || PR.busy) + vd + '</div>' +
       '<div class="bar two"><button class="btn" data-act="pprev"' + (PR.qi === 0 ? ' disabled' : '') + '>上一题</button>' +
       '<button class="btn' + (rs ? ' main' : '') + '" data-act="pnext"' + (rs ? '' : ' disabled') + '>' + (PR.qi === n - 1 ? '看结果' : '下一题') + '</button></div>';
@@ -702,10 +747,135 @@ const Stu = (() => {
     try { r = await rpc('stu_practice', { act: 'answer', a: { pid: my.id, i, choice: j } }, { obj: true }); } catch (e) { err = e; }
     if (PR !== my) return;                         // 等的时候已经退出或换了一次练习
     PR.busy = false;
-    if (!err && r && r.state === 'exam') { PR.sel = null; toast(r.msg || '先交卷，再继续练习'); }
+    if (!err && r && (r.state === 'exam' || r.state === 'off')) { PR.sel = null; toast(r.msg || '先交卷，再继续练习'); }
     else if (!err && r && r.i === i && Number.isInteger(r.a)) { PR.res[i] = r; PR.sel = r.mine; }
     else { PR.sel = null; toast('没判上：' + (err ? err.message : '回复不对') + '，再点一次'); }   // 服务器已经记下的话，再点会回第一次的结果
     if (tab === PR.back) render();
+  }
+
+  // ── 刷题（第 36 步）：自己选刷哪些词、再筛档/题型/难度、这次做多少；当场判对错、显示解析。不算成绩、不进错词本、不算打卡 ──
+  const drillOn = () => !!(D && D.drill && D.drill.on);
+  const SCN = { learned: ['学过的词', '学习记录里学过的'], err: ['错词本里的词', '测验答错过的'], dwrong: ['我刷题时错过的', '刷题时最近一次做错的'], week: ['本周的词', '这一周词单里的'], all: ['全部', '学习范围里所有的词（含没学过的）＋学过的词＋本周词单'] };
+  const NSET = [10, 20, 50, 100];
+  const ORD = [['fresh', '优先没做过的', '先出你没见过的题'], ['done', '只出做过的题', '只从你答过的题里出，复习用'], ['rand', '全部随机', '不管做没做过']];
+  // 读「能选什么」：每次进刷题页读一次（各范围的词数会变）；后发的请求才算数，切走了也照样记下（不会把页面拉回来）
+  async function dLoad() {
+    const my = ++dSeq; dLoading = true;
+    if (tab === 'drill' && !PR) render();
+    let r = null, err = null;
+    try { r = await rpc('stu_drill', { act: 'opts', a: {} }, { obj: true }); } catch (e) { err = e; }
+    if (my !== dSeq) return;
+    dLoading = false;
+    syncStar(r);
+    if (err) { DS = Object.assign(DS || {}, { err: err.message }); }
+    else {
+      const old = DS || {}, sc = (r.scopes || []).filter(x => x && SCN[x.k]);
+      const okSc = k => sc.some(x => x.k === k && x.on && num(x.n) > 0);
+      DS = { opts: r, err: null, scope: okSc(old.scope) ? old.scope : (['learned', 'week', 'err', 'dwrong', 'all'].find(okSc) || null),
+             lv: new Set([...(old.lv || [])].filter(l => (r.lv || []).includes(l))), t: new Set([...(old.t || [])].filter(t => JN.some(([k]) => k === t))),
+             st: new Set(r.star === false ? [] : (old.st || [])),   // 老师关了「显示档和难度星级」：之前选的星级条件清掉（页面上也不显示这个筛选）
+             n: old.n || null, custom: old.custom || '', cnt: null,
+             order: old.order && r.orders && r.orders[old.order] ? old.order : (r.order || 'fresh') };   // 出题方式：上次选的还开着就接着用，不然用老师设的默认
+      const mx = num(r.max, 100), ns = NSET.filter(x => x <= mx);   // 默认 20 题；上限比 20 小就用能选的最大的那个（都没有就用上限）
+      if (!DS.n || DS.n > mx) DS.n = ns.includes(20) ? 20 : ns.length ? ns[ns.length - 1] : mx;
+      if (r.state === 'ok') dCount();
+    }
+    if (tab === 'drill' && !PR) render();
+  }
+  const dWant = () => { if (!DS) return null; if (DS.custom !== '') { const v = Number(DS.custom); return Number.isInteger(v) && v >= 1 && v <= num(DS.opts && DS.opts.max, 100) ? v : null; } return DS.n; };
+  const dArgs = () => Object.assign({ scope: DS.scope, lv: [...DS.lv], t: [...DS.t], order: DS.order || 'fresh' }, DS.opts && DS.opts.star === false ? {} : { st: [...DS.st].sort() });
+  // 数「符合条件有几题」：选项一变就等 250 毫秒再数（后发的才算数）
+  function dCount() {
+    clearTimeout(dcTimer);
+    if (!DS || !DS.scope) return;
+    const my = ++dcSeq; DS.cnt = null; dPaint();
+    dcTimer = setTimeout(async () => {
+      let r = null; try { r = await rpc('stu_drill', { act: 'count', a: dArgs() }, { obj: true }); } catch (e) { r = { err: e.message }; }
+      if (my !== dcSeq || !DS) return;
+      DS.cnt = r; dPaint();
+    }, 250);
+  }
+  // 只更新「符合条件」那一行和开始按钮（自己填数字时不重画整页，输入框不会跳）
+  function dPaint() {
+    const c = $('dcnt'), b = $('dgo'); if (!c || !b || !DS) return;
+    const want = dWant(), cnt = DS.cnt, mx = num(DS.opts && DS.opts.max, 100);
+    let t = '';
+    if (!DS.scope) t = '先选上面「刷哪些词」';
+    else if (!cnt) t = '正在数符合条件的题……';
+    else if (cnt.err) t = '没数出来（' + esc(cnt.err) + '），可以直接点开始';
+    else if (cnt.state && cnt.state !== 'ok') t = esc(cnt.msg || '');
+    else t = '符合条件：<b>' + num(cnt.n) + '</b> 题（' + num(cnt.words) + ' 个词，同一个词这次最多 ' + num(cnt.per, 1) + ' 题）' + (want && num(cnt.n) < want && num(cnt.n) > 0 ? '。只有 ' + num(cnt.n) + ' 题，就做这 ' + num(cnt.n) + ' 题' : '')
+      + (num(cnt.n) === 0 && cnt.order === 'done' ? '。「只出做过的题」只从你答过的题里出，这个范围里你还没答过题' + (DS.opts && DS.opts.orders && (DS.opts.orders.fresh || DS.opts.orders.rand) ? '，可以换个范围或者换出题方式' : '，可以换个范围') : '');
+    if (DS.custom !== '' && !want) t += '<br><span class="bad">自己填的题数要在 1～' + mx + ' 之间</span>';
+    c.innerHTML = t;
+    const zero = cnt && !cnt.err && cnt.state === 'ok' && num(cnt.n) === 0;
+    b.disabled = prStarting || !DS.scope || !want || zero;
+    b.textContent = prStarting ? '正在出题……' : zero ? '没有符合条件的题' : '开始刷题' + (want ? '（' + (cnt && !cnt.err && num(cnt.n) < want ? num(cnt.n) : want) + ' 题）' : '');
+  }
+  function drillHTML() {
+    if (!drillOn()) return '<div class="box"><h2>刷题</h2><div class="muted">老师暂时没有开放刷题。</div></div>';
+    if (!DS || (!DS.opts && !DS.err)) { if (!dLoading) setTimeout(dLoad, 0); return '<div class="box"><h2>刷题</h2><div class="muted">正在读取……</div></div>'; }
+    if (!DS.opts) return '<div class="box"><h2>刷题</h2><div class="warnbox">没读到：' + esc(DS.err) + ' <button type="button" class="gbtn" data-act="dreload">重新读取</button></div></div>';
+    const o = DS.opts;
+    if (o.state === 'exam') return '<div class="box"><h2>刷题</h2><div class="warnbox">' + esc(o.msg || '先交卷，再继续刷题') + '</div><div><button type="button" class="btn main" data-tab="test">去测验</button> <button type="button" class="gbtn" data-act="dreload">交完了，再看看</button></div></div>';
+    if (o.state !== 'ok') return '<div class="box"><h2>刷题</h2><div class="muted">' + esc(o.msg || '老师暂时没有开放刷题') + '</div></div>';
+    const mx = num(o.max, 100), mine = o.mine || {}, sc = (o.scopes || []).filter(x => x && SCN[x.k] && x.on);
+    let h = '<div class="note dnote">刷题<b>不算成绩、不进错词本、不算打卡</b>（本周练过数也不变）。答错的只记在刷题记录里，可以在「我刷题时错过的」里再刷。' +
+      (num(mine.n) ? '你一共刷了 ' + num(mine.n) + ' 题，答对 ' + Math.round(num(mine.right) * 100 / num(mine.n)) + '%。' : '') + '</div>';
+    h += '<div class="box drill"><h2>刷哪些词</h2><div class="dscs" role="group" aria-label="刷哪些词">' + (sc.length ? sc.map(x => '<button type="button" class="dsc" data-dsc="' + x.k + '" aria-pressed="' + (DS.scope === x.k) + '"' + (num(x.n) ? '' : ' disabled') + '><span><b>' + SCN[x.k][0] + '</b><small>' + SCN[x.k][1] + '</small></span><span class="n">' + num(x.n) + ' 个词</span></button>').join('') : '<div class="muted">老师没有开放可以选的范围。</div>') + '</div>';
+    const ords = ORD.filter(([k]) => !o.orders || o.orders[k]);
+    if (ords.length > 1) h += '<h2>出题方式</h2><div class="dords" role="group" aria-label="出题方式">' + ords.map(([k, nm, sub]) => '<button type="button" class="ck dord" data-dord="' + k + '" aria-pressed="' + (DS.order === k) + '"><b>' + nm + '</b><small>' + sub + '</small></button>').join('') + '</div>';
+    else if (ords.length === 1) h += '<div class="small muted dord1">出题方式：<b>' + ords[0][1] + '</b>（老师设的：' + ords[0][2] + '）</div>';
+    h += '<h2>再筛 <small>可以不选＝都要</small></h2>' +
+      '<div class="dfl"><span class="lab">档</span><div class="checks">' + (o.lv || []).map(l => '<button type="button" class="ck" data-dlv="' + l + '" aria-pressed="' + DS.lv.has(l) + '">' + l + '</button>').join('') + '</div></div>' +
+      '<div class="dfl"><span class="lab">题型</span><div class="checks">' + JN.map(([k, nm]) => '<button type="button" class="ck" data-dt="' + k + '" aria-pressed="' + DS.t.has(k) + '" lang="ja">' + nm + '</button>').join('') + '</div></div>' +
+      (o.star !== false ? '<div class="dfl"><span class="lab">难度 <small>同一档里比，1 星最容易</small></span><div class="checks">' + [1, 2, 3, 4, 5].map(s => '<button type="button" class="ck dst" data-dst="' + s + '" aria-pressed="' + DS.st.has(s) + '" aria-label="' + s + ' 星">' + '★'.repeat(s) + '</button>').join('') + '</div></div>' : '');
+    h += '<h2>这次做多少 <small>最多 ' + mx + ' 题，题目随机</small></h2><div class="dnum">' + NSET.filter(x => x <= mx).map(x => '<button type="button" class="ck" data-dn="' + x + '" aria-pressed="' + (DS.custom === '' && DS.n === x) + '">' + x + ' 题</button>').join('') +
+      '<label class="dcus">自己填<input id="dcustom" type="number" inputmode="numeric" min="1" max="' + mx + '" value="' + esc(DS.custom) + '" placeholder="1～' + mx + '" aria-label="自己填这次做多少题"></label></div>' +
+      '<div class="dbar"><div class="small muted" id="dcnt" role="status" aria-live="polite"></div>' +
+      '<button type="button" class="btn main dgo" id="dgo" data-act="dstart" disabled>开始刷题</button></div></div>';   // 「符合条件」和开始按钮贴在屏幕底下（手机上不用滚到最下面）
+    setTimeout(dPaint, 0);
+    return h;
+  }
+  // 出一份刷题：带请求编号（网络没回复再点，服务器给回同一份）；等的时候切走了就不再拉回来
+  async function dStart(a, title) {
+    if (prStarting) return;
+    const key = 'drill|' + JSON.stringify(a), req = prPend && prPend.key === key ? prPend.req : uid(), my = ++prSeq;
+    prPend = { key, req }; prStarting = true; dPaint();
+    let r; try { r = await rpc('stu_drill', { act: 'start', a: Object.assign({ req }, a) }, { obj: true }); }
+    catch (e) { if (my !== prSeq) return; prStarting = false; if (e.status >= 400 && e.status < 500) prPend = null; fail(e); dPaint(); return; }
+    if (my !== prSeq) return;
+    prStarting = false; prPend = null; syncStar(r);
+    if (r && (r.state === 'exam' || r.state === 'off')) { toast(r.msg || '先交卷，再继续刷题'); DS = Object.assign(DS || {}, { opts: r }); if (tab === 'drill' && !PR) render(); return; }
+    if (!r || r.state !== 'ok' || !Array.isArray(r.items) || !r.items.length) { toast((r && r.msg) || '没有符合条件的题'); dPaint(); return; }
+    PR = { id: r.id, items: r.items, res: new Array(r.items.length).fill(null), qi: 0, sel: null, busy: false, title, back: 'drill', kind: 'drill',
+           asked: num(r.asked, r.items.length), avail: num(r.avail, r.items.length), args: a.pid ? null : a, again: !!a.pid, all: !!a.all, ended: false };
+    tab = 'drill'; render(); window.scrollTo({ top: 0 });
+  }
+  function drillRunHTML() {
+    const n = PR.items.length, done = PR.res.filter(Boolean).length;
+    if (PR.qi >= n || PR.ended) {
+      const right = PR.res.filter(x => x && x.ok).length, by = {};
+      PR.items.forEach((it, i) => { const r = PR.res[i]; if (!r) return; const b = by[it.t] || (by[it.t] = [0, 0]); b[0]++; if (r.ok) b[1]++; });
+      const rows = JN.filter(([k]) => by[k]).map(([k, nm]) => '<tr><td lang="ja">' + nm + '</td><td>' + by[k][1] + ' / ' + by[k][0] + '</td><td>' + Math.round(by[k][1] * 100 / by[k][0]) + '%</td></tr>').join('');
+      const other = Object.keys(by).filter(k => !JN.some(([j]) => j === k));
+      return '<div class="card"><h2>' + (PR.ended && done < n ? '这次刷到这里' : '刷完了') + '</h2><div class="stats"><div class="stat"><b>' + done + '</b><span>这次做了' + (done < n ? '（共 ' + n + ' 题）' : '') + '</span></div><div class="stat"><b>' + right + '</b><span>答对</span></div><div class="stat"><b>' + (done ? Math.round(right * 100 / done) : 0) + '%</b><span>正确率</span></div></div>' +
+        (rows || other.length ? '<div class="scroll"><table class="t"><tr><th>题型</th><th>答对</th><th>正确率</th></tr>' + rows + other.map(k => '<tr><td>其他</td><td>' + by[k][1] + ' / ' + by[k][0] + '</td><td>' + Math.round(by[k][1] * 100 / by[k][0]) + '%</td></tr>').join('') + '</table></div>' : '') +
+        '<div class="muted">刷题不算成绩、不进错词本、不算打卡' + (done < n ? '；没做的题不算' : '') + '。</div><div class="form">' +
+        (done > right ? '<button class="btn main" data-act="dagain">再刷一遍做错的（' + (done - right) + ' 题）</button>' : '') +
+        '<button class="btn' + (done > right ? '' : ' main') + '" data-act="dall">再刷一遍这组（' + n + ' 题）</button>' +
+        (PR.args ? '<button class="btn" data-act="dmore">同样的条件再刷一组</button>' : '') +
+        '<button class="btn" data-act="pexit">返回刷题设置</button></div></div>';
+    }
+    const it = PR.items[PR.qi], rs = PR.res[PR.qi];
+    const vd = rs ? '<div class="vd ' + (rs.ok ? 'ok' : 'bad') + '" role="status">' + (rs.ok ? '答对了' : '答错了，正确答案是第 ' + (rs.a + 1) + ' 个') + '</div>' + (rs.why ? '<div class="why">' + esc(rs.why) + '</div>' : '')
+      : PR.busy ? '<div class="vd muted" role="status">正在判……</div>' : '<div class="small muted">选了马上告诉你对不对</div>';
+    return '<div class="wkline"><span class="muted">' + esc(PR.title) + ' · 第 ' + (PR.qi + 1) + ' / ' + n + ' 题 · 已做 ' + done + ' · 不算成绩</span><button type="button" class="gbtn" data-act="dend"' + (PR.busy ? ' disabled' : '') + '>结束</button></div>' +
+      (PR.qi === 0 && PR.avail < PR.asked ? '<div class="note">' + (PR.again ? '上一组' + (PR.all ? '一共 ' : '做错 ') + PR.asked + ' 题，老师改了设置以后现在还能刷 ' + PR.avail + ' 题' : '符合条件的只有 ' + PR.avail + ' 题') + '，这次就做这 ' + n + ' 题。</div>'
+        : PR.qi === 0 && n < Math.min(PR.avail, PR.asked) ? '<div class="note">老师设的每次最多 ' + n + ' 题，这次先做这 ' + n + ' 题。</div>' : '') +
+      '<div class="card">' + qBody(it, PR.sel, rs, !!rs || PR.busy) + vd + '</div>' +
+      '<div class="bar two"><button class="btn" data-act="pprev"' + (PR.qi === 0 ? ' disabled' : '') + '>上一题</button>' +
+      '<button class="btn' + (rs ? ' main' : '') + '" data-act="pnext"' + (rs ? '' : ' disabled') + '>' + (PR.qi === n - 1 ? '看结果' : '下一题') + '</button></div>';
   }
 
   // ── 错词本 ──
@@ -825,6 +995,7 @@ const Stu = (() => {
       tab = tb.dataset.tab; listView = false; window.scrollTo({ top: 0 });
       render();
       if (tab === 'map' || tab === 'err') refreshSide(tab);
+      if (tab === 'drill') dLoad();                 // 每次进刷题页读一次（各范围的词数会变）
       return;
     }
     if (t.closest('#front')) { flip(); return; }
@@ -832,14 +1003,31 @@ const Stu = (() => {
     const o = t.closest('[data-opt]'); if (o && T) { if (!o.disabled) pick(+o.dataset.opt); return; }
     const wc = t.closest('[data-wid]'); if (wc) { jumpTo(wc.dataset.wid); return; }
     const pq = t.closest('[data-preq]'); if (pq) { if (!pq.disabled) reqModal(pq.dataset.preq); return; }
+    // 刷题页：选范围、再筛（再点一次取消）、选题数；选项一变就重新数符合条件的题
+    const dsc = t.closest('[data-dsc]'); if (dsc) { if (!dsc.disabled && DS && !PR) { DS.scope = dsc.dataset.dsc; render(); dCount(); } return; }
+    const dfl = t.closest('[data-dlv],[data-dt],[data-dst]'); if (dfl) {
+      if (!DS || PR) return;
+      const [set, v] = dfl.dataset.dlv ? [DS.lv, dfl.dataset.dlv] : dfl.dataset.dt ? [DS.t, dfl.dataset.dt] : [DS.st, +dfl.dataset.dst];
+      if (set.has(v)) set.delete(v); else set.add(v);
+      render(); dCount(); return;
+    }
+    const dn = t.closest('[data-dn]'); if (dn) { if (DS && !PR) { DS.n = +dn.dataset.dn; DS.custom = ''; render(); } return; }
+    const dor = t.closest('[data-dord]'); if (dor) { if (DS && !PR && DS.order !== dor.dataset.dord) { DS.order = dor.dataset.dord; render(); dCount(); } return; }
     const a = t.closest('[data-act]'); if (!a || a.disabled) return;
     const act = a.dataset.act;
+    if (act === 'dstart') { if (!DS || PR || T) return; const want = dWant(); if (!want || !DS.scope) { toast('先选好刷哪些词和题数'); return; } dStart(Object.assign(dArgs(), { n: want }), '刷题'); return; }
+    if (act === 'dagain') { if (PR && PR.kind === 'drill' && !PR.busy) dStart({ pid: PR.id }, '再刷一遍做错的'); return; }
+    if (act === 'dall') { if (PR && PR.kind === 'drill' && !PR.busy) dStart({ pid: PR.id, all: true }, '再刷一遍这组'); return; }
+    if (act === 'dmore') { if (PR && PR.kind === 'drill' && PR.args && !PR.busy) dStart(PR.args, '刷题'); return; }
+    if (act === 'dend') { if (!PR || PR.kind !== 'drill' || PR.busy) return; if (PR.res.some(Boolean)) { PR.ended = true; render(); window.scrollTo({ top: 0 }); } else { prStop(); render(); dLoad(); } return; }   // 中途结束：只算做了的
+    if (act === 'dreload') { busy(a, true); dLoad(); return; }
     if (['all', 'rev', 'back', 'list', 'more', 'tstart'].includes(act)) dropRound();   // 转去做别的：还没回来的取卡请求作废
     if (act === 'ptest') { if (T) return; pStart({ tid: a.dataset.tid }, '练本次错题', 'test'); return; }
+    if (act === 'pretest') { if (T) return; pStart({ rid: a.dataset.tid }, '整卷再做一遍', 'test'); return; }
     if (act === 'pgroup') { const ids = [...again].filter(id => pool().some(c => c.id === id) || cards().some(c => c.id === id)).slice(0, 40); pStart({ ids }, '只练不太确定/不会的词', 'study'); return; }
     if (act === 'pagain') { if (PR) pStart({ pid: PR.id }, '再练一遍错的', PR.back); return; }
-    if (act === 'pexit') { prStop(); render(); window.scrollTo({ top: 0 }); return; }
-    if (act === 'pmore') { if (PR && PR.tid && PR.more) pStart({ tid: PR.tid, part: PR.part + 1 }, PR.title, PR.back); return; }
+    if (act === 'pexit') { const wasDrill = !!(PR && PR.kind === 'drill'); prStop(); render(); window.scrollTo({ top: 0 }); if (wasDrill) dLoad(); return; }
+    if (act === 'pmore') { if (PR && (PR.tid || PR.rid) && PR.more) pStart(PR.rid ? { rid: PR.rid, part: PR.part + 1 } : { tid: PR.tid, part: PR.part + 1 }, PR.title, PR.back); return; }
     if (act === 'pprev') { if (PR && PR.qi > 0 && !PR.busy) { PR.qi--; PR.sel = PR.res[PR.qi] ? PR.res[PR.qi].mine : null; render(); } return; }
     if (act === 'pnext') { if (PR && PR.res[PR.qi] && !PR.busy) { PR.qi++; PR.sel = PR.qi < PR.items.length && PR.res[PR.qi] ? PR.res[PR.qi].mine : null; render(); window.scrollTo({ top: 0 }); } return; }
     if (act === 'flip') flip();
@@ -867,8 +1055,16 @@ const Stu = (() => {
     }
     else if (act === 'submit') submit();
   });
+  // 刷题页「自己填」题数：只更新按钮和那一行（不重画整页，输入框不跳）
+  document.addEventListener('input', e => {
+    if (!D || $('app').dataset.role === 'adm' || !e.target || e.target.id !== 'dcustom' || !DS) return;
+    DS.custom = e.target.value.trim();
+    document.querySelectorAll('[data-dn]').forEach(b => b.setAttribute('aria-pressed', DS.custom === '' && DS.n === +b.dataset.dn ? 'true' : 'false'));
+    dPaint();
+  });
   document.addEventListener('keydown', e => {
     if (!D || $('app').dataset.role === 'adm' || document.querySelector('.modal')) return;
+    if (e.target && e.target.id === 'dcustom') { if (e.key === 'Enter') { const b = $('dgo'); if (b && !b.disabled) b.click(); } return; }
     if (PR) { if (PR.qi < PR.items.length && ['1', '2', '3', '4'].includes(e.key) && PR.items[PR.qi].o[+e.key - 1] !== undefined) pAnswer(+e.key - 1); return; }
     if (tab === 'study' && !flipped && !listView && (e.key === ' ' || e.key === 'Enter') && queue.length && !e.target.closest('button')) { e.preventDefault(); flip(); }
     else if (tab === 'study' && flipped && ['1', '2', '3'].includes(e.key)) rate({ 1: 'no', 2: 'mid', 3: 'ok' }[e.key]);

@@ -69,7 +69,7 @@ function lvText(lv, opt = {}) {
   return t;
 }
 
-function toast(t) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => el.hidden = true, 3200); }
+function toast(t, ms) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => el.hidden = true, ms || 3200); }   // ms：长的提示多停一会儿
 function fail(e) { toast(e && e.message ? e.message : '没成功，请再试一次'); }
 function busy(btn, on) { if (btn) { btn.disabled = on; } }
 
