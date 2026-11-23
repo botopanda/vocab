@@ -281,3 +281,12 @@ table.t th{color:var(--muted);font-weight:400;font-size:12px;border-top:0}
 .extbl{width:100%;border-collapse:collapse;font-size:12px}.extbl td,.extbl th{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left;white-space:nowrap}
 .extw{overflow-x:auto}
 .field .tin,#f-exDomains{width:100%;max-width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font-size:15px;font-family:inherit}
+
+/* 第 35 步：页脚署名（小字，在页面最下面，不挡内容）、调量说明、没及格的提示、练习 */
+.credit{max-width:720px;margin:20px auto 0;padding:10px 16px calc(14px + env(safe-area-inset-bottom,0px));font-size:11px;line-height:1.5;color:var(--muted);text-align:center;word-break:break-word}
+.fxb{display:flex;flex-wrap:wrap;gap:8px}
+.fxb .btn{flex:1 1 180px}
+.adjn{margin-top:8px}
+.fbar{border-color:var(--bad,#c33)}
+.fxp{font-size:13px;line-height:1.7}
+.fxp>div+div{margin-top:4px}

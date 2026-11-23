@@ -86,15 +86,17 @@ const Adm = (() => {
     const t = TPL();
     let h = '<div class="row"><div class="muted">词库：' + LV.map(l => l + ' ' + (D.counts[l] || 0)).join(' · ') + '</div><button class="btn main" data-a="add">＋ 加学生</button></div>';
     if (D.reqs.length) h += '<div class="note rqbar"><span><b>有 ' + D.reqs.length + ' 个换方案申请</b>在等你处理</span><button class="gbtn" data-a="reqs">查看、处理</button></div>';
+    const fs = failList();
+    if (fs.length) h += '<div class="note rqbar fbar"><span><b>有 ' + fs.length + ' 个学生最近一次交卷没及格</b>：' + fs.slice(0, 3).map(x => esc(x.name) + '（' + esc(x.last_test.name || '') + ' ' + num(x.last_test.score) + '/' + num(x.last_test.total) + '）').join('、') + (fs.length > 3 ? ' 等' : '') + '</span><button class="gbtn" data-a="fails">查看、调整新词量</button></div>';
     if (!D.students.length) return h + '<div class="box"><h2>还没有学生</h2><div class="muted">点右上角「加学生」，加好后把专属链接发给学生，学生用手机打开就能学。</div></div>';
     const rqs = new Set(D.reqs.map(r => r.sid));
     h += '<div class="box"><div class="list">' + D.students.map(s => {
       const w = s.week, lt = s.last_test;
       const wk = w ? '第 ' + num(w.no) + ' 周' + (w.kind === 'R' ? '（回顾）' : '') + (w.cur ? (w.kind === 'L' ? (num(w.n) ? ' · 本周练过 ' + num(w.done) + '/' + num(w.n) : ' · <span class="chip warn">这周没有词</span>') : '') : '（已到期，学生还没打开新的一周）') : md(s.start) + ' 开始';
-      return '<div class="it clickable" data-stu="' + esc(s.id) + '" role="button" tabindex="0"><div class="main"><div class="nm">' + esc(s.name) + (s.grp ? ' <span class="chip">' + esc(s.grp) + '</span>' : '') + (s.streak ? ' <span class="chip ok">连续 ' + num(s.streak) + ' 天</span>' : '') + (s.active ? '' : ' <span class="chip bad">已停用</span>') + (rqs.has(s.id) ? ' <span class="chip warn">申请中</span>' : '') + '</div>' +
+      return '<div class="it clickable" data-stu="' + esc(s.id) + '" role="button" tabindex="0"><div class="main"><div class="nm">' + esc(s.name) + (s.grp ? ' <span class="chip">' + esc(s.grp) + '</span>' : '') + (s.streak ? ' <span class="chip ok">连续 ' + num(s.streak) + ' 天</span>' : '') + (s.active ? '' : ' <span class="chip bad">已停用</span>') + (rqs.has(s.id) ? ' <span class="chip warn">申请中</span>' : '') + (failOpen(s) ? ' <span class="chip bad">没及格待处理</span>' : '') + '</div>' +
         '<div class="sub">' + esc(t[s.plan] || s.plan) + (Object.keys(s.ov || {}).length ? ' · 单独改了 ' + Object.keys(s.ov).length + ' 项' : '') + (s.next_cut != null ? ' · 下周新词 ' + num(s.next_cut) + ' 个' : '') + '</div></div>' +
         '<div class="sub side"><div>' + wk + ' · 累计学过 ' + num(s.learned) + ' · 全亮 ' + num(s.correct) + '</div>' +
-        '<div>' + (lt ? '最近测验 ' + num(lt.score) + '/' + num(lt.total) + (lt.passed ? ' 及格' : lt.manual ? ' 放行' : ' 没及格') : '还没考过') + ' · ' + (s.last_seen ? '最后打开 ' + stamp(s.last_seen) : '还没打开过') + '</div></div></div>';
+        '<div>' + (lt ? '最近测验 ' + num(lt.score) + '/' + num(lt.total) + (lt.passed ? ' 及格' : lt.manual ? ' 放行' : ' 没及格' + (lt.fix ? '（已处理）' : '')) : '还没考过') + ' · ' + (s.last_seen ? '最后打开 ' + stamp(s.last_seen) : '还没打开过') + '</div></div></div>';
     }).join('') + '</div></div>';
     return h;
   }
@@ -136,7 +138,10 @@ const Adm = (() => {
     const m = modal('<div class="row"><h2>' + esc(s.name) + ' <small class="muted">学生编号 ' + esc(String(sid).slice(0, 8)) + '</small></h2><button class="gbtn" data-close>关闭</button></div>' +
       '<div class="muted">' + esc(t[s.plan] || s.plan) + ' · ' + md(s.start) + ' 开始' + (s.memo ? ' · ' + esc(s.memo) : '') + '</div>' +
       (cur ? '<div class="note">现在第 <b>' + num(cur.no) + '</b> 周' + (cur.kind === 'R' ? '（回顾周）' : '') + '：' + md(cur.start) + '～' + md(cur.end) + (cur.kind === 'L' ? ' · 本周练过 <b>' + num(cur.done) + ' / ' + num(cur.n) + '</b>' : '') + '</div>' : '') +
-      '<div class="row" style="justify-content:flex-start"><button class="gbtn" data-d="link">专属链接</button><button class="gbtn" data-d="cfg">改这个学生的设置</button><button class="gbtn" data-d="edit">改名字/备注/停用</button></div>' +
+      (failOpen(s) ? '<div class="warnbox">' + esc(s.last_test.name || '最近一次测验') + '没及格（' + num(s.last_test.score) + '/' + num(s.last_test.total) + '，及格线 ' + num(s.last_test.pass, 95) + '%）<button class="gbtn" data-d="fail">调整新词量</button></div>' :
+        s.last_test && s.last_test.fix ? '<div class="note">' + esc(s.last_test.name || '最近一次测验') + '没及格，已处理：' + esc(fixTxt(s.last_test.fix)) + '</div>' : '') +
+      '<div class="row" style="justify-content:flex-start"><button class="gbtn" data-d="link">专属链接</button><button class="gbtn" data-d="cfg">改这个学生的设置</button><button class="gbtn" data-d="edit">改名字/备注/停用</button>' +
+      (cur && cur.kind === 'L' ? '<button class="gbtn" data-d="words">这一周的词单（换词）</button>' : '') + '</div>' +
       '<div class="lab">只对这个学生、马上生效</div>' +
       '<div class="form"><div class="row"><span>' + esc(extTxt) + '</span><button class="gbtn" data-d="extend"' + (cur ? '' : ' disabled') + '>延长 1 周</button></div>' +
       (cur && cur.kind === 'L' && !num(cur.nnew) && !cur.tested ? '<div class="row"><span>' + (cur.check ? '<b>请核对：</b>旧记录分不清有没有给这个学生设过「下周暂停/减量」，这一周先没自动发词。确认要学的话，补发几个：' : '这一周没有新词（还没开考）。现在补发几个：') + '</span><span class="copyrow"><input id="refv" type="number" min="1" max="500" value="' + num(cur.weekly, 100) + '" style="width:80px" aria-label="补发几个新词"><button class="gbtn" data-d="refill">补发新词</button></span></div>' : '') +
@@ -158,6 +163,8 @@ const Adm = (() => {
       if (d === 'link') { acting = true; try { const k = await rpc('adm_student_key', { sid, fresh: false }, { str: true }); m.close(); linkModal(sid, k); } catch (er) { fail(er); } acting = false; return; }
       if (d === 'cfg') { m.close(); tab = 'cfg'; scope = 'stu'; stuKey = sid; draft = null; render(); return; }
       if (d === 'edit') { m.close(); editModal(sid); return; }
+      if (d === 'fail') { m.close(); failModal(sid, s.last_test.id); return; }
+      if (d === 'words') { m.close(); wordsModal(sid); return; }
       let val = null, extra = {};
       if (d === 'cut') { const raw = m.querySelector('#cutv').value.trim(); val = Number(raw); if (raw === '' || !Number.isInteger(val) || val < 0 || val > 500) { toast('请填 0～500 之间的整数'); return; } }
       if (d === 'extend') { if (!cur) return; extra = { wk: cur.id, ext: num(cur.extended) }; }
@@ -173,6 +180,185 @@ const Adm = (() => {
       }
     });
   }
+  // ── 考没过后「调整新词量」 ──
+  // 最近一次正式交卷没及格（老师放行的不算）、还没处理
+  const failOpen = s => { const lt = s && s.last_test; return !!(s && s.active && lt && lt.id && num(lt.total) && !lt.passed && !lt.manual && !lt.fix); };
+  const failList = () => D.students.filter(failOpen);
+  // 打开新弹窗前收起上一条黑色提示（不挡弹窗里的内容）
+  const quiet = () => { const el = $('toast'); if (el) { el.hidden = true; clearTimeout(toast.h); } };
+  // 一周的安排（服务器按实际发词规则算好的，老师端、学生端、处理记录用同一个结果）
+  const wkTxt = w => w && w.no ? '第 ' + num(w.no) + ' 周（' + md(w.start) + ' 开始）' : '';
+  function firstTxt(pl) {
+    const f = pl && pl.first; if (!f) return '';
+    if (f.rule === 'B') return '总数 ' + num(f.total) + ' 个（其中预计新词 ' + num(f.new) + '、带回错词 ' + num(f.carry) + (num(f.over) ? '，错词多出的 ' + num(f.over) + ' 个往后排' : '') + '）';
+    return num(f.new) === 0 ? '暂停新词，只学带回的错词 ' + num(f.carry) + ' 个' : '新词 ' + num(f.new) + '＋带回错词 ' + num(f.carry) + '＝' + num(f.total) + ' 个';
+  }
+  // 处理记录里「原来」的说法：「总数不变」写原总数和其中预计新词
+  const firstShort = f => !f ? '' : f.rule === 'B' ? '总数 ' + num(f.total) + ' 个（其中预计新词 ' + num(f.new) + ' 个）' : '新词 ' + num(f.new) + ' 个';
+  const secondTxt = pl => { const s = pl && pl.second; return s ? (s.rule === 'B' ? '每周总数 ' + num(s.total) + ' 个' : '每周新词 ' + num(s.new) + ' 个') : ''; };
+  function planTxt(pl) {
+    if (!pl || !pl.target) return '';
+    const th = pl.then && pl.then.no ? '第 ' + num(pl.then.no) + ' 周起' : '之后';
+    return wkTxt(pl.target) + '：' + firstTxt(pl) + '；' + th + (pl.how === 'once' ? '恢复' : '') + secondTxt(pl) + '。';
+  }
+  // 保存时带回：这份方案怎么改、数字、保留选择、指纹（服务器在锁里重算，指纹不一样就不保存）
+  const seenOf = pl => ({ target_no: pl.target && pl.target.no, target_start: pl.target && pl.target.start, old_cut: pl.old_cut, old_weekly: pl.old_weekly, b: pl.b });
+  const planArgs = pl => ({ how: pl.how, n: pl.n, cut: pl.cut || null, sig: pl.sig, base: pl.base, seen: seenOf(pl) });
+  function fixTxt(f) {
+    if (!f) return '';
+    const who = '（' + (f.by || '老师') + '，' + stamp(f.at) + '）', f0 = f.plan0 && f.plan0.first;
+    if (f.how === 'once') return '第 ' + num(f.no) + ' 周新词改为 ' + num(f.n) + ' 个' + (num(f.n) === 0 ? '（暂停新词）' : '') + '，原来' + (f0 ? firstShort(f0) : ' ' + num(f.old) + ' 个') + who;
+    if (f.how === 'long') return '每周' + (f.plan && f.plan.b ? '总数 ' : '新词 ') + num(f.old_weekly) + ' → ' + num(f.n) + ' 个，从第 ' + num(f.long_from || f.no) + ' 周起' +
+      (f.kept != null ? '（第 ' + num(f.no) + ' 周仍是之前单独设的 ' + num(f.kept) + ' 个）' : '') + who;
+    return '维持原量（第 ' + num(f.no) + ' 周 ' + firstShort(f0 || (f.plan && f.plan.first)) + '）' + who;
+  }
+  function failsModal() {
+    quiet();
+    const fs = failList();
+    if (!fs.length) { toast('现在没有待处理的没及格'); return; }
+    const m = modal('<div class="row"><h2>最近一次交卷没及格 <small class="muted">' + fs.length + ' 个学生</small></h2><button class="gbtn" data-close>关闭</button></div>' +
+      '<div class="muted">只看每个学生最近一次交卷（老师放行的不算）。老师暂时不处理的话，学生照日历继续学（不卡进度）。处理过的不再提示。</div><div class="list">' +
+      fs.map(x => '<div class="it"><div class="main"><div class="nm">' + esc(x.name) + '</div><div class="sub">' + esc(x.last_test.name || '') + ' ' + num(x.last_test.score) + '/' + num(x.last_test.total) + '，及格线 ' + num(x.last_test.pass, 95) + '% · ' + stamp(x.last_test.at) + '</div></div>' +
+        '<div class="side"><button type="button" class="gbtn" data-fx="' + esc(x.id) + '">调整新词量</button></div></div>').join('') + '</div>');
+    m.addEventListener('click', e => { const b = e.target.closest('[data-fx]'); if (!b) return; const x = stuOf(b.dataset.fx); m.close(); if (x && x.last_test) failModal(x.id, x.last_test.id); });
+  }
+  async function failModal(sid, tid) {
+    quiet();
+    let d; try { d = await rpc('adm_stu_op', { sid, act: 'fail', a: { tid } }, { obj: true }); } catch (e) { fail(e); return; }
+    const s = stuOf(sid) || { name: '' }, te = d.test || {}, wr = Array.isArray(d.wrong) ? d.wrong : [];
+    let pl = d.plan || {};
+    const head = '<div class="row"><h2>' + esc(s.name) + '：调整新词量</h2><button class="gbtn" data-close>关闭</button></div>' +
+      '<div><b>' + esc(te.name || '') + '</b>：' + num(te.score) + ' / ' + num(te.total) + '，及格线 ' + num(te.pass, 95) + '%' + (te.at ? '（' + stamp(te.at) + ' 交卷）' : '') + '</div>';
+    const wrongH = '<details><summary>本次错词 ' + wr.length + ' 个</summary><div class="list">' + wr.map(x => '<div class="it"><span><span class="nm" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r) + '</span></span><span class="sub">' + esc(x.m) + '</span></div>').join('') + '</div></details>';
+    if (d.fix) { modal(head + wrongH + '<div class="note pok">已处理：' + esc(fixTxt(d.fix)) + '</div><button class="btn" data-close>好的</button>'); return; }
+    if (!te.latest) { modal(head + '<div class="warnbox">这个学生之后又交过卷了，只处理最近一次交卷。请关掉，从学生页顶上重新打开。</div><button class="btn" data-close>好的</button>'); return; }
+    const base = pl.old_cut != null ? num(pl.old_cut) : num(pl.old_weekly);
+    const m = modal(head +
+      '<div class="note" id="fxk"></div>' + wrongH +
+      '<form class="form" id="fxf"><label>新词数<input id="fxn" type="number" inputmode="numeric" min="0" max="500" value="' + Math.floor(base / 2) + '" style="max-width:120px"></label>' +
+      '<div class="small" id="fxw" role="status"></div><div class="fxp" id="fxp" aria-live="polite"></div>' +
+      '<div class="fxb"><button type="button" class="btn main" data-fh="once" disabled>只改下个新学周</button><button type="button" class="btn" data-fh="long" disabled>从下个新学周起每周都改</button><button type="button" class="btn" data-fh="keep" disabled>维持原量</button></div>' +
+      '<div class="small muted">只改下个新学周：写进「下周新词数」，只减新词、错词照常全部带上，填 0＝暂停新词。每周都改：写进这个学生自己的每周新词数（10～500），以后在「单个学生」设置里点「跟随上一级」就恢复。' +
+      '每个按钮保存的就是上面显示的那一份；数字改了要等重新算好才能点，保存时会再核对一次，情况变了会请你再确认。</div></form>');
+    const inp = m.querySelector('#fxn'), pv = m.querySelector('#fxp'), kp = m.querySelector('#fxk'), wn = m.querySelector('#fxw');
+    // 每个按钮绑定它自己最后一次算好、显示出来的那份方案；没有（正在算、算失败、数字不合格、情况变了正在重算）就不能点
+    let ready = { once: null, long: null, keep: null }, acting = false;
+    const setBtns = () => m.querySelectorAll('[data-fh]').forEach(b => { b.disabled = acting || !ready[b.dataset.fh]; });
+    // 「维持原量」和现在的情况
+    const showKeep = () => {
+      kp.innerHTML = '现在是第 ' + num(pl.cur_no) + ' 周（已经发了的词单不改）。下个新学周：<b>' + esc(wkTxt(pl.target)) + '</b>' + (num(pl.target && pl.target.skip) ? '（前面 ' + num(pl.target.skip) + ' 周是回顾周，跳过）' : '') +
+        '。不改的话：' + esc(firstTxt(pl)) + (pl.old_cut != null ? '（之前单独设的「下周新词数」）' : d.own_weekly ? '（这个学生自己的每周新词数）' : '') +
+        (pl.b ? '；「下周学多少」选的是总数不变（错词先占位）' : '') + (pl.open ? '。这周还没结束，错词数是现在的，届时按实际带上' : '') + '。';
+    };
+    showKeep();
+    // 一次请求、同一把锁里算三份（维持、只改一周、每周都改），顶上「现在的样子」和三个按钮都用这一次的结果；后发的请求才算数
+    let pseq = 0, ptimer = 0;
+    const okPlan = (x, base) => !!x && typeof x.sig === 'string' && x.base === base && !!x.target && !!x.first;
+    const preview = () => {
+      clearTimeout(ptimer);
+      const raw = inp.value.trim(), v = Number(raw), my = ++pseq, good = raw !== '' && Number.isInteger(v) && v >= 0 && v <= 500;
+      ready = { once: null, long: null, keep: null }; setBtns();
+      pv.innerHTML = raw === '' ? '<div class="muted">请填写新词数（只改一周时填 0＝暂停新词）</div>' : !good ? '<div class="muted">请填 0～500 之间的整数</div>' : '<div class="muted">正在算……</div>';
+      ptimer = setTimeout(async () => {
+        let r = null, err = null;
+        try {
+          r = await rpc('adm_stu_op', { sid, act: 'plans', a: { tid, n: good ? v : '' } }, { obj: true });
+          // 回复不完整（缺指纹、三份的基准对不上）也当没算出来
+          if (!r || typeof r.base !== 'string' || !okPlan(r.keep, r.base) || (good && !okPlan(r.once, r.base)) || (good && v >= 10 && !okPlan(r.long, r.base))) throw new Error('回复不对');
+        } catch (e) { err = e; }
+        if (my !== pseq || !m.isConnected) return;
+        if (err) {   // 没算出来：都不能点，给「重新算」
+          pv.innerHTML = '<div class="warnbox">预览没算出来：' + esc(err.message) + ' <button type="button" class="gbtn" data-fxr>重新算</button></div>';
+          return;
+        }
+        const a1 = good ? r.once : null, a2 = good && v >= 10 ? r.long : null;
+        pl = r.keep; showKeep();
+        ready = { keep: r.keep, once: a1, long: a2 };
+        if (good) pv.innerHTML = (a1 ? '<div><b>只改下个新学周：</b>' + esc(planTxt(a1)) + '</div>' : '') +
+          '<div><b>每周都改：</b>' + (a2 ? esc(planTxt(a2)) + (a2.old_cut != null ? '（第 ' + num(a2.target.no) + ' 周已经单独设过 ' + num(a2.old_cut) + ' 个，保存时会问要不要保留）' : '') : '每周新词数要 10～500') + '</div>';
+        setBtns();
+      }, 300);
+    };
+    inp.addEventListener('input', () => { wn.innerHTML = ''; preview(); }); preview();
+    const send = async plan => {
+      if (!plan || acting) return;
+      acting = true; setBtns(); wn.innerHTML = '';
+      let r; try { r = await rpc('adm_stu_op', { sid, act: 'adjust', a: Object.assign({ tid }, planArgs(plan)) }, { obj: true }); }
+      catch (er) { acting = false; setBtns(); fail(er); if (/已经处理过|及格|又交过卷/.test(er.message)) { m.close(); await reload(); } return; }
+      acting = false;
+      if (!m.isConnected) return;
+      if (r.stale) {
+        // 情况变了（发了新的一周、别的老师改了设置、错词数变了）：不保存；三个按钮先都不能点，重新算好、显示出来以后老师再点
+        preview();
+        wn.innerHTML = '<div class="warnbox">' + esc(r.msg || '情况变了，请看新的预览再确认一次') + '</div>';
+        return;
+      }
+      if (r.confirm) {
+        setBtns(); quiet();
+        const t1 = '第 ' + num(r.target && r.target.no) + ' 周';
+        const ch = await ask(t1 + '已经单独设过新词数', '保留：' + esc(planTxt(r.keep_plan)) + '<br>也改：' + esc(planTxt(r.clear_plan)),
+          [['keep', '保留' + t1 + ' ' + num(r.cut) + ' 个', true], ['clear', t1 + '也改成 ' + num(r.n) + ' 个'], ['no', '先不改']]);
+        if ((ch === 'keep' || ch === 'clear') && m.isConnected) send(ch === 'keep' ? r.keep_plan : r.clear_plan);   // 提交确认框里显示的那一份
+        return;
+      }
+      toast('已处理：' + fixTxt(r.fix)); m.close(); await reload();
+    };
+    m.addEventListener('click', e => {
+      if (e.target.closest('[data-fxr]')) { preview(); return; }
+      const b = e.target.closest('[data-fh]'); if (!b || b.disabled || acting) return;
+      send(ready[b.dataset.fh]);
+    });
+    m.querySelector('#fxf').addEventListener('submit', e => e.preventDefault());
+  }
+
+  // ── 这一周的词单：换掉个别词 ──
+  const SRCN = { carry: '上周错词', extra: '追加', new: '新词' };
+  async function wordsModal(sid, done) {
+    quiet();
+    let d; try { d = await rpc('adm_stu_op', { sid, act: 'wlist', a: {} }, { obj: true }); } catch (e) { fail(e); return; }
+    const s = stuOf(sid) || { name: '' }, ws = Array.isArray(d.words) ? d.words : [], wk = d.week || {};
+    document.querySelectorAll('.modal.wds').forEach(x => x.close ? x.close() : x.remove());
+    const m = modal('<div class="row"><h2>' + esc(s.name) + '：第 ' + num(wk.no) + ' 周词单 <small class="muted">' + ws.length + ' 个</small></h2><button class="gbtn" data-close>关闭</button></div>' +
+      (done ? '<div class="note pok" role="status">' + esc(done) + '</div>' : '') +
+      (d.can ? '<div class="muted">周测开考前可以换。「换掉」＝从同一档按常用顺序补一个没学过的新词；也可以「指定」换成哪个词。换下来的新词回到词库（这周练过的记录作废）；换下来的上周错词仍在错词本里，这周不学不考，从下个学新词周起优先带上。</div>'
+             : '<div class="warnbox">' + esc(d.why || '现在不能换') + '</div>') +
+      '<div class="list">' + ws.map(x => '<div class="it"><div class="main"><div class="nm"><span lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r) + '</span> <span class="chip">' + esc(x.lvl) + '</span>' +
+        (x.src !== 'new' ? ' <span class="chip warn">' + SRCN[x.src] + '</span>' : '') + (x.done ? ' <span class="chip ok">练过</span>' : '') + (x.off ? ' <span class="chip">已停用</span>' : '') + '</div><div class="sub">' + esc(x.m) + '</div></div>' +
+        (d.can ? '<div class="side"><button type="button" class="gbtn" data-sw="' + esc(x.id) + '">换掉</button> <button type="button" class="link" data-sp="' + esc(x.id) + '">指定</button></div>' : '') + '</div>').join('') + '</div>');
+    m.classList.add('wds');
+    let acting = false;
+    m.addEventListener('click', async e => {
+      const sw = e.target.closest('[data-sw]'), sp = e.target.closest('[data-sp]');
+      if (sp) { const x = ws.find(y => y.id === sp.dataset.sp); if (x) pickWordModal(sid, wk.id, x); return; }
+      if (!sw || sw.disabled || acting) return;
+      acting = true; busy(sw, true);
+      let msg = '';
+      try { msg = swapMsg(await rpc('adm_stu_op', { sid, act: 'wswap', a: { wk: wk.id, from: sw.dataset.sw } }, { obj: true })); }
+      catch (er) { fail(er); }
+      acting = false; wordsModal(sid, msg);
+    });
+  }
+  // 换好以后的说明（写在重新打开的词单顶上，不用会挡住列表的黑色提示）
+  const swapMsg = r => '已换：「' + r.from.w + '」→「' + r.to.w + '」' + (r.hold_no ? '；「' + r.from.w + '」这周不学不考，第 ' + num(r.hold_no) + ' 周起优先带' : '') + '（学生刷新后看到）';
+  // 指定换成哪个词：输入词号或写法找（只给学习范围里、没学过、没停用的）
+  function pickWordModal(sid, wk, x) {
+    quiet();
+    const m = modal('<h2>把「' + esc(x.w) + '」换成…</h2><form class="form" id="pkf"><div class="copyrow"><input id="pkq" maxlength="20" placeholder="词的写法、读音或编号"><button class="gbtn">找</button></div></form><div id="pkr" class="checks"></div><button class="btn" data-close>取消</button>');
+    const q = m.querySelector('#pkq'), out = m.querySelector('#pkr');
+    m.querySelector('#pkf').addEventListener('submit', async e => {
+      e.preventDefault();
+      let r; try { r = await rpc('adm_stu_op', { sid, act: 'wfind', a: { q: q.value.trim() } }); } catch (er) { fail(er); return; }
+      out.innerHTML = (r || []).length ? r.map(c => '<button type="button" class="ck" data-to="' + esc(c.id) + '">' + esc(c.lvl + ' ' + c.w + '（' + c.r + '）' + c.m) + '</button>').join('') : '<div class="muted">没找到（只找学习范围里、没学过、没停用的词）</div>';
+    });
+    out.addEventListener('click', async e => {
+      const b = e.target.closest('[data-to]'); if (!b || b.disabled) return;
+      out.querySelectorAll('[data-to]').forEach(y => y.disabled = true);
+      try { const r = await rpc('adm_stu_op', { sid, act: 'wswap', a: { wk, from: x.id, to: b.dataset.to } }, { obj: true }); m.close(); wordsModal(sid, swapMsg(r)); }
+      catch (er) { fail(er); out.querySelectorAll('[data-to]').forEach(y => y.disabled = false); }
+    });
+    setTimeout(() => q.focus(), 50);
+  }
+
   function editModal(sid) {
     const s = stuOf(sid);
     const m = modal('<h2>改学生信息</h2><form class="form" id="edf"><label>名字<input id="en" maxlength="30" value="' + esc(s.name) + '" required></label>' +
@@ -671,6 +857,7 @@ const Adm = (() => {
     }
     if (t.closest('[data-a="add"]')) { addModal(); return; }
     if (t.closest('[data-a="reqs"]')) { reqsModal(); return; }
+    if (t.closest('[data-a="fails"]')) { failsModal(); return; }
     const st = t.closest('[data-stu]'); if (st) { detailModal(st.dataset.stu); return; }
     if (tab !== 'cfg') return;
     if (savingCfg) { toast('正在保存，等一下'); return; }
