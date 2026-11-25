@@ -8,7 +8,8 @@ const Adm = (() => {
     revN: ['个', 10, 500, 10], revPass: ['%', 50, 100, 5], qEvery: ['周', 4, 52, 1], qN: ['个', 10, 1000, 10], qPass: ['%', 50, 100, 5], yEvery: ['周', 12, 104, 1], yN: ['个', 10, 2000, 10], yPass: ['%', 50, 100, 5],
     exPerWord: ['句', 1, 20, 1], exPerDay: ['次', 0, 5000, 10], exPerMin: ['次', 1, 60, 1], exInflight: ['个', 1, 50, 1], exNewsDays: ['天', 1, 365, 1], exNewsWin: ['天', 7, 365, 1], exNoMatchDays: ['天', 1, 60, 1],
     drillMax: ['题', 5, 500, 10], drillPer: ['题', 1, 5, 1], starN: ['次', 10, 1000, 10], starMinQ: ['道', 5, 500, 5], retestN: ['场', 0, 50, 1],
-    tyDays: ['天', 7, 365, 1], tyMin: ['题', 1, 100, 1], lsRep: ['遍', 1, 5, 1], lsGap: ['秒', 0, 10, 0.5] };   // 第 38 步：随身听（停几秒可以有一位小数）
+    tyDays: ['天', 7, 365, 1], tyMin: ['题', 1, 100, 1], lsRep: ['遍', 1, 5, 1], lsGap: ['秒', 0, 10, 0.5],   // 第 38 步：随身听（停几秒可以有一位小数）
+    chkDays: ['天', 7, 365, 1], chkN: ['个', 1, 50, 1], chkMax: ['天', 7, 730, 10], rvDays: ['天', 0, 7, 1] };   // 第 39 步：一个月后抽查、回顾周每天的目标
   const LAB = { weekly: '每周新词数', days: '每周学几天', addOn: '再来一组', addN: '一组几个', mode: '学法', ratio: '各档比例', start: '从哪一档开始', only: '学哪几档',
     srsOn: '每天复习', srsN: '每天最多复习', learnW: '先学几周', revW: '回顾几周', untaught: '还没学的词', pass: '周测及格线', types: '周测题型', carryFail: '没及格带错词', carryPass: '及格也带错词', total: '下周学多少',
     revN: '回顾周抽多少', revMust: '错词一定抽到', revPass: '回顾周及格线', qOn: '季度测', qEvery: '季度测间隔', qN: '季度测抽多少', qPass: '季度测及格线',
@@ -22,12 +23,14 @@ const Adm = (() => {
     drillOrder: '默认出题方式', drillOrders: '学生可以选的出题方式', retestN: '最近几场可以整卷再做',
     wlOn: '开放全部词表', wlSee: '没学过的词能不能看', tyDays: '题型表现「最近几天」', tyMin: '少于几题标「题少」',
     acOn: '刷题、练习里出「听音选意思」', lsOn: '开放随身听', lsRep: '随身听每个词连着播几遍', lsGap: '随身听词与词之间停几秒', lsEx: '随身听播例句', lsOrder: '随身听顺序',
-    qfOn: '开放快刷', qfFront: '快刷先看哪一面', qfOrder: '快刷顺序' };
+    qfOn: '开放快刷', qfFront: '快刷先看哪一面', qfOrder: '快刷顺序',
+    chkOn: '一个月后抽查', chkDays: '复习毕业满几天开始抽查', chkN: '每天最多抽查几个', chkMax: '抽查间隔最长几天', chkErr: '抽查忘了的进错词本', rvDays: '回顾周「复习本轮」分几天' };
   const WHO = { anthropic: '只用 Claude', openai: '只用 OpenAI', both: '两家轮流', off: '关闭' };
-  const SW = ['srsOn', 'addOn', 'carryFail', 'carryPass', 'revMust', 'qOn', 'yOn', 'dim', 'instant', 'exOn', 'drillOn', 'starShow', 'testFresh', 'starAuto', 'wlOn', 'acOn', 'lsOn', 'lsEx', 'qfOn'];
+  const SW = ['srsOn', 'addOn', 'carryFail', 'carryPass', 'revMust', 'qOn', 'yOn', 'dim', 'instant', 'exOn', 'drillOn', 'starShow', 'testFresh', 'starAuto', 'wlOn', 'acOn', 'lsOn', 'lsEx', 'qfOn', 'chkOn', 'chkErr'];
   const WLSEE = [['all', '能看（学习范围里的词都列）'], ['learned', '只看学过的和本周的']];   // 第 37 步
   const has37 = () => !!(D && D.global && 'wlOn' in D.global);   // 数据库跑过第 37 步（所有学生的默认里有词表的设置）
   const has38 = () => !!(D && D.global && 'acOn' in D.global);   // 数据库跑过第 38 步（所有学生的默认里有听力、随身听、快刷的设置）
+  const has39 = () => !!(D && D.global && 'chkOn' in D.global);   // 数据库跑过第 39 步（所有学生的默认里有一个月后抽查、回顾周每天的目标）
   const ORDS = [['seq', '按顺序'], ['rand', '打乱']];
   // 刷题可选范围（第 36 步）：没写的算开
   const DSC = [['learned', '学过的词'], ['err', '错词本里的词'], ['dwrong', '我刷题时错过的'], ['week', '本周的词'], ['all', '全部（含没学过的）']];
@@ -171,6 +174,7 @@ const Adm = (() => {
       '</table></div>' +
       '<div class="lab">错过的词 ' + wrong.length + ' 个' + (wrong.length > 60 ? '，下面显示错得最多的 60 个' : '') + '</div>' +
       (wrong.length ? '<div class="list">' + wrong.slice(0, 60).map(x => '<div class="it"><span><span class="nm" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r) + '</span></span><span class="sub">' + esc(x.m) + ' · 错 ' + num(x.times) + ' 次' + (x.st === 'correct' ? ' · 后来对了' : '') + (x.off ? ' · 已停用' : '') + '</span></div>').join('') + '</div>' : '<div class="muted">还没有。</div>') +
+      (det.chk && typeof det.chk === 'object' ? '<div class="lab">一个月后抽查（试点） <small class="muted">' + (det.chk.on ? '开着' : '关着') + '</small></div>' + chkHTML(det.chk) : '') +   // 第 39 步
       '<div class="lab">刷题 <small class="muted">不算成绩、不进错词本</small></div><div id="dstat" class="muted">正在读取……</div>' +
       (has37() ? '<div class="lab">各题型正确率 <small class="muted">和学生「进度」页看到的一样</small></div><div id="tstat" class="muted">正在读取……</div>' : ''));
     m.classList.add('det');
@@ -201,6 +205,16 @@ const Adm = (() => {
         if ((d === 'extend' || d === 'refill') && /已经延长过|换到第|旧了|已经有新词|已经开考/.test(er.message)) { m.close(); await reload(); detailModal(sid); }
       }
     });
+  }
+  // 学生详情里的一个月后抽查（第 39 步）：抽查了几个、忘了几个（比例）、最近 30 天；复习毕业的词几个、到了抽查日子的几个；这个学生现在的设置；最近忘了的词
+  function chkHTML(c) {
+    const pc = (a, b) => num(b) ? Math.round(num(a) * 100 / num(b)) + '%' : '—', rc = Array.isArray(c.recent) ? c.recent : [];
+    const set = '设置：毕业满 ' + num(c.days, 30) + ' 天开始、每天最多 ' + num(c.per, 5) + ' 个、间隔最长 ' + num(c.max, 90) + ' 天、忘了的' + (c.err ? '进' : '不进') + '错词本';
+    if (!num(c.n)) return '<div class="muted small" id="chkst">' + (c.on ? '还没抽查过。' : '这个学生没开（要试用请在「改这个学生的设置」里打开）。') + '复习毕业的词 ' + num(c.grad) + ' 个' + (c.on ? '，到了抽查日子的 ' + num(c.due) + ' 个' : '') + '。' + (c.on ? set : '') + '</div>';
+    return '<div id="chkst"><div class="stats"><div class="stat"><b>' + num(c.n) + '</b><span>一共抽查了</span></div><div class="stat"><b>' + num(c.forgot) + '</b><span>忘了（' + pc(c.forgot, c.n) + '）</span></div>' +
+      '<div class="stat"><b>' + num(c.n30) + '</b><span>最近 30 天（忘了 ' + num(c.forgot30) + ' 个，' + pc(c.forgot30, c.n30) + '）</span></div></div>' +
+      '<div class="small muted">复习毕业的词 ' + num(c.grad) + ' 个，到了抽查日子的 ' + num(c.due) + ' 个' + (num(c.inbook) ? ' · 忘了记进错词本的 ' + num(c.inbook) + ' 个' : '') + (c.last ? ' · 最后一次 ' + md(c.last) : '') + ' · ' + set + '</div>' +
+      (rc.length ? '<div class="small muted" style="margin-top:6px">最近忘了的词（回到每天复习了）</div><div class="list">' + rc.map(x => '<div class="it"><span><span class="nm" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r && x.r !== x.w ? x.r : '') + '</span></span><span class="sub">' + esc(x.m) + ' · ' + md(x.d) + (x.err ? ' · 进了错词本' : '') + '</span></div>').join('') + '</div>' : '') + '</div>';
   }
   // 学生详情里的刷题统计（第 36 步）：总题数、正确率、最近 7 天／30 天、按题型、刷题常错的词前 20 个
   async function drillStats(sid, m, seq) {
@@ -770,7 +784,7 @@ const Adm = (() => {
       fld('addOn', '学完可以「再来一组」', sw('addOn', '学完可以再来一组'), hint('追加的词算进本周，一起考')) + fld('addN', '一组几个', stepHTML('addN')) +
       fld('order', '本周词单顺序', seg('c-order', '本周词单顺序', [['mix', '打乱'], ['lv', '按档从易到难']]), hint('打乱：各档的词、上周错词混在一起，同一周里顺序固定。按档：上周错词在前，新词从 N5 到 N1、常用的在前')) + '</section>' +
       '<section class="box" id="bxLv"><h2>' + (scope === 'tpl' ? '方案「' + esc(t[tplKey] || '') + '」：各档怎么学' : '各档怎么学') + ' <small>' + LV.map((l, i) => l + ' ' + CN[i]).join(' · ') + '</small></h2>' +
-      (scope === 'tpl' ? '<div class="muted">方案还可以单独设下面的「刷题」「整卷再做一遍」「题目上方的档和难度星级」' + (has37() ? '「全部词表和题型表现」' : '') + (has38() ? '「听力、随身听、快刷」' : '') + '；其他设置都跟「所有学生的默认」，要单独调某个学生请到「单个学生」。</div><div class="copyrow"><button type="button" class="gbtn" id="copyTpl">复制成新方案</button><button type="button" class="gbtn" id="renTpl">改名</button></div>' : '') +
+      (scope === 'tpl' ? '<div class="muted">方案还可以单独设下面的「刷题」「整卷再做一遍」「题目上方的档和难度星级」' + (has37() ? '「全部词表和题型表现」' : '') + (has38() ? '「听力、随身听、快刷」' : '') + (has39() ? '「一个月后抽查」「回顾周每天的目标」' : '') + '；其他设置都跟「所有学生的默认」，要单独调某个学生请到「单个学生」。</div><div class="copyrow"><button type="button" class="gbtn" id="copyTpl">复制成新方案</button><button type="button" class="gbtn" id="renTpl">改名</button></div>' : '') +
       fld('mode', '学法', seg('c-mode', '学法', [['mix', '按比例混合'], ['step', '逐级'], ['only', '只学某几档']])) +
       '<div class="small muted" id="lvNote" hidden></div>' +
       '<div class="sub2" id="pMix"><span class="inh" id="i-ratio"></span><div id="lvRows" style="display:flex;flex-direction:column;gap:8px">' +
@@ -778,7 +792,15 @@ const Adm = (() => {
       '</div><div class="sumline" id="ratioSum"><span id="ratioTxt"></span><button type="button" class="gbtn" id="ratioReset">恢复系统初始比例（' + DEF_RATIO.join('/') + '）</button></div></div>' +
       '<div class="sub2" id="pStep">' + fld('start', '从哪一档开始', seg('c-start', '从哪一档开始', LV.map(l => [l, l]))) + '<div class="note" id="stepTxt"></div></div>' +
       '<div class="sub2" id="pOnly">' + fld('only', '学哪几档', '<div class="checks" id="c-only">' + LV.map((l, i) => '<button type="button" class="ck" data-v="' + l + '" aria-pressed="false">' + l + ' · ' + CN[i] + '</button>').join('') + '</div>') + '<div class="note" id="onlyTxt"></div></div></section>' +
-      '<section class="box" id="bxSrs"><h2>每天复习 <small>按遗忘曲线：学过的词隔 1、2、4、7、15 天回来一次</small></h2>' + fld('srsOn', '要每天复习', sw('srsOn', '要每天复习')) + fld('srsN', '每天最多复习几个', stepHTML('srsN'), hint('到期的词比这个多时，按到期早的先复习，剩下的明天接着来')) + '</section>' +
+      '<section class="box" id="bxSrs"><h2>每天复习 <small>按遗忘曲线：学过的词隔 1、2、4、7、15 天回来一次</small></h2>' + fld('srsOn', '要每天复习', sw('srsOn', '要每天复习')) + fld('srsN', '每天最多复习几个', stepHTML('srsN'), hint('到期的词比这个多时，按到期早的先复习，剩下的明天接着来' + (has39() ? '。开了「一个月后抽查」时，抽查的词也算在这里面' : ''))) + '</section>' +
+      (has39() ? '<section class="box" id="bxChk"><h2>一个月后抽查（试点） <small id="chkOff"></small></h2>' +
+        '<div class="muted small">每天复习里 5 次都「会了」的词就「毕业」了，以后不再出现。打开这一项：毕业满一段时间的词，每天抽几个放进「今天复习」，卡上标「抽查」。保存后马上生效；建议先在「单个学生」或方案里给几个学生试用。</div>' +
+        fld('chkOn', '一个月后抽查', sw('chkOn', '一个月后抽查'), hint('默认关。抽查不算新学、不占每周新词数；算在「今天复习」里，也算打卡')) +
+        fld('chkDays', '复习毕业满几天开始抽查', stepHTML('chkDays'), hint('默认 30 天')) +
+        fld('chkN', '每天最多抽查几个', stepHTML('chkN'), hint('占「每天最多复习几个」里的名额：每天先留给抽查，剩下的给平常的复习。试用的学生建议把「每天最多复习几个」调高（加上每天抽查的个数），不然平常复习会变少')) +
+        fld('chkMax', '抽查间隔最长几天', stepHTML('chkMax'), hint('抽查点「会了」：下次隔的天数翻倍（按默认是 30 → 60 → 90），达到这个数以后保持。改了这几项：已经排好的抽查日期保留，下次评分时才按新的间隔安排；还没抽查过的词按新的天数算第一次')) +
+        fld('chkErr', '抽查忘了的进错词本', sw('chkErr', '抽查忘了的进错词本'), hint('点「不会」「不太确定」的词都回到每天复习、从第 1 次重新来。默认关＝不进错词本；开＝错的次数加 1、进错词本（错词本里写「一个月后抽查」）')) +
+        '<div class="note">学生详情里能看到抽查了几个、忘了几个。</div></section>' : '') +
       '<section class="box"><h2>学习循环</h2>' + fld('learnW', '先学几周新词', stepHTML('learnW')) + fld('revW', '接着回顾几周', stepHTML('revW'), hint('填 0 就是不要回顾周')) + '</section>' +
       '<section class="box"><h2>周测</h2><div class="field"><div class="fl"><span>考哪些词</span></div><span class="lock">本周词单里的全部词，不抽查（含追加的、带过来的错词）</span></div>' +
       fld('untaught', '到周测时还没学的词', seg('c-untaught', '还没学的词', [['test', '照考'], ['next', '不考，挪到下周']])) +
@@ -791,6 +813,8 @@ const Adm = (() => {
       fld('total', '带过去以后，下周学多少', seg('c-total', '下周学多少', [['A', '新词照旧＋错词'], ['B', '总数不变']])) + '<div class="note" id="totalTxt"></div></section>' +
       '<section class="box" id="bxRev"><h2>回顾周 <small id="revOff"></small></h2>' + fld('revN', '抽多少个词来考', stepHTML('revN'), hint('学过的词不够时，有多少考多少')) +
       fld('revMust', '前几周错过的词一定抽到', sw('revMust', '错过的词一定抽到'), hint('错词比上面的数还多时，全部考')) + fld('revPass', '及格线', stepHTML('revPass')) + '</section>' +
+      (has39() ? '<section class="box" id="bxRg"><h2>回顾周每天的目标 <small id="rgOff"></small></h2>' +
+        fld('rvDays', '回顾周「复习本轮」分几天复习完', stepHTML('rvDays'), hint('把这一轮要复习的词平均分到每天：学生页「本周任务」显示「今天的目标 N 个、已完成 M 个」。只是目标提示，不强制、不锁，做完可以接着往后做；回顾测照原规则。0＝不分天。保存后马上生效')) + '</section>' : '') +
       '<section class="box" id="bxQ"><h2>季度测 <small>按设置出卷</small></h2>' + fld('qOn', '要季度测', sw('qOn', '要季度测')) + fld('qEvery', '每几周考一次', stepHTML('qEvery')) + fld('qN', '抽多少个词', stepHTML('qN')) + fld('qPass', '及格线', stepHTML('qPass')) + '</section>' +
       '<section class="box" id="bxY"><h2>年测 <small>按设置出卷</small></h2>' + fld('yOn', '要年测', sw('yOn', '要年测')) + fld('yEvery', '每几周考一次', stepHTML('yEvery')) + fld('yN', '抽多少个词', stepHTML('yN')) + fld('yPass', '及格线', stepHTML('yPass')) + '</section>' +
       '<section class="box"><h2>几场测验撞在同一周</h2>' + fld('merge', '怎么考', seg('c-merge', '同一周几场测验', [['merge', '合成一场'], ['both', '分开考']])) + '</section>' +
@@ -840,7 +864,7 @@ const Adm = (() => {
       fld('exDomains', '时事新闻只搜这些网站', '<textarea id="f-exDomains" rows="6" spellcheck="false" aria-label="新闻只搜哪些网站"></textarea>', hint('每行一个，最多 20 个，例如 nhk.or.jp（不写 https:// 和路径）')) +
       '<div class="note">每月预算、价格、用量、学生报错、试生成在顶上的「拓展例句」页。</div></section>';
     // 方案只管「各档怎么学」和刷题：别的块都不显示（元素留着，页面的其他计算照常）
-    if (scope === 'tpl') h = h.replace(/<section class="box"(?! id="bx(?:Lv|Drill|Show|Retest|Wl|Lq)")/g, '<section class="box" hidden');   // 第 36 步起方案也管刷题、题目上方显示档和星级、整卷再做；第 37 步起也管词表和题型表现；第 38 步起也管听力、随身听、快刷
+    if (scope === 'tpl') h = h.replace(/<section class="box"(?! id="bx(?:Lv|Drill|Show|Retest|Wl|Lq|Chk|Rg)")/g, '<section class="box" hidden');   // 第 36 步起方案也管刷题、题目上方显示档和星级、整卷再做；第 37 步起也管词表和题型表现；第 38 步起也管听力、随身听、快刷
     return h;
   }
   function saveBar() { return '<div class="savebar"><div class="wrap"><div class="st" id="dirty" role="status">没有改动</div><div style="display:flex;gap:8px"><button type="button" class="btn" id="discard" disabled>放弃改动</button><button type="button" class="btn main" id="save" disabled>保存</button></div></div></div>'; }
@@ -879,6 +903,7 @@ const Adm = (() => {
     if (k === 'wlSee') return v === 'learned' ? '只看学过的和本周的' : '能看';
     if (k === 'lsOrder' || k === 'qfOrder') return v === 'rand' ? '打乱' : '按顺序';   // 第 38 步
     if (k === 'qfFront') return v === 'm' ? '先看中文' : '先看写法';
+    if (k === 'rvDays' && v === 0) return '不分天';   // 第 39 步
     return String(v);
   }
   function changes() {
@@ -914,7 +939,7 @@ const Adm = (() => {
   function whoTxt() {
     const t = TPL(), s = stuOf(stuKey);
     const nm = scope === 'global' ? '所有学生的默认' : scope === 'tpl' ? '方案「' + t[tplKey] + '」' : (s ? s.name : '');
-    const pw = has38() ? '、刷题、词表和题型表现、听力和随身听快刷' : has37() ? '、刷题、词表和题型表现' : has36() ? '和刷题' : '';   // 方案能单独设哪些（第 36 步起刷题，第 37 步起词表和题型表现，第 38 步起听力、随身听、快刷）
+    const pw = has39() ? '、刷题、词表和题型表现、听力和随身听快刷、一个月后抽查和回顾周目标' : has38() ? '、刷题、词表和题型表现、听力和随身听快刷' : has37() ? '、刷题、词表和题型表现' : has36() ? '和刷题' : '';   // 方案能单独设哪些（第 36 步起刷题，第 37 步起词表和题型表现，第 38 步起听力、随身听、快刷）
     $('who').innerHTML = '正在改：<b>' + esc(nm) + '</b>' + (scope === 'global' ? '（每个学生的起点；方案只管各档怎么学' + pw + '）' : scope === 'tpl' ? '（用这个方案的学生，共 ' + D.students.filter(x => x.plan === tplKey).length + ' 人；方案只管各档怎么学' + pw + '）' : '（只影响这一个学生）');
     $('sumWho').textContent = scope === 'stu' ? (s ? s.name : '') + ' 的情况' : scope === 'tpl' ? '用「' + t[tplKey] + '」的学生' : '所有学生的默认';
   }
@@ -988,6 +1013,9 @@ const Adm = (() => {
     lockBox('bxDrill', !e.drillOn, 'drillOn'); lockBox('bxStar', !e.starAuto, 'starAuto');
     const dimF = (ks, off) => ks.forEach(k => { const f = $('fd-' + k); if (f) { f.classList.toggle('dim', off); f.querySelectorAll('input,button:not([data-reset])').forEach(x => x.disabled = off); } });   // 第 38 步
     dimF(['lsRep', 'lsGap', 'lsEx', 'lsOrder'], e.lsOn === false); dimF(['qfFront', 'qfOrder'], e.qfOn === false);
+    dimF(['chkDays', 'chkN', 'chkMax', 'chkErr'], e.chkOn !== true);   // 第 39 步：抽查关着时下面几项先不用改
+    const co = $('chkOff'); if (co) co.textContent = e.chkOn === true && e.srsOn === false ? '现在「每天复习」关着，抽查也不出' : '';
+    const ro = $('rgOff'); if (ro) ro.textContent = e.revW === 0 ? '现在没有回顾周，这一项不起作用' : '';
     const fws = $('fd-wlSee'); if (fws) { fws.classList.toggle('dim', e.wlOn === false); fws.querySelectorAll('button:not([data-reset])').forEach(x => x.disabled = e.wlOn === false); }   // 第 37 步：关了词表，「没学过的词能不能看」先不用改（题型表现两项不受影响）
     const fa = $('fd-addN'); fa.classList.toggle('dim', !e.addOn); fa.querySelectorAll('input,button').forEach(x => x.disabled = !e.addOn);
     const fw = $('fd-whyT'); fw.classList.toggle('dim', !e.instant); fw.querySelectorAll('.ck').forEach(x => x.disabled = !e.instant);
@@ -1024,7 +1052,8 @@ const Adm = (() => {
       draft = null; savingCfg = false;
       // 按这次实际改的项写生效时间：刷题、星级、拓展例句的设置马上生效（星级规则改了马上重算）；其他从各学生的下一周起
       const NOW = ['drillOn', 'drillScopes', 'drillMax', 'drillPer', 'drillOrder', 'drillOrders', 'starShow', 'retestN', 'starAuto', 'starN', 'starMinQ', 'wlOn', 'wlSee', 'tyDays', 'tyMin',
-        'acOn', 'lsOn', 'lsRep', 'lsGap', 'lsEx', 'lsOrder', 'qfOn', 'qfFront', 'qfOrder'], isNow = k => NOW.includes(k) || /^ex/.test(k);
+        'acOn', 'lsOn', 'lsRep', 'lsGap', 'lsEx', 'lsOrder', 'qfOn', 'qfFront', 'qfOrder',
+        'chkOn', 'chkDays', 'chkN', 'chkMax', 'chkErr', 'rvDays'], isNow = k => NOW.includes(k) || /^ex/.test(k);   // 第 39 步：抽查、回顾周目标也马上生效
       const keys = [...new Set([...Object.keys(effOld || {}), ...Object.keys(effNew || {})])].filter(k => !same((effOld || {})[k], (effNew || {})[k]));
       const nNow = keys.filter(isNow).length, nAll = keys.length, star = keys.some(k => ['starAuto', 'starN', 'starMinQ'].includes(k));
       // 混着改时把马上生效的项全部点名（按设置页上的先后；4 项以上分行写，提示多停一会儿）

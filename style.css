@@ -429,3 +429,7 @@ details.lqset>.small{padding:6px 0 10px;border-top:1px solid var(--line)}
 .qfcard .mean{text-align:center}
 .qfcard .big{overflow-wrap:anywhere;max-width:100%}
 @media (max-width:360px){.qfbar .qft{display:none}.bar.qfbar .btn{font-size:18px}}   /* 最窄的手机：「上一个／下一个」只留箭头，不换行（读屏照样读「上一个」「下一个」） */
+/* 第 39 步：回顾周「今天的目标 N 个、已完成 M 个」（学习页回顾周那一块里） */
+.rgl{font-size:14px;background:var(--ai-soft);border-radius:10px;padding:8px 12px;margin-top:8px;overflow-wrap:anywhere}
+.rgl b{color:var(--ai);font-weight:500}
+.rgl .small{margin-top:2px}

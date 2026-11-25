@@ -4,14 +4,22 @@ const Stu = (() => {
   let queue = [], flipped = false, again = new Set(), mode = 'new';   // mode: new 本周还没练的＋今天要再练的 / all 再过一遍 / rev 今天的复习 / round 回顾周复习本轮
   // 复习本轮（回顾周）：点按钮时才单独读取（学生页打开时不读）；评分只在这次复习里起作用，不写学习记录，第一次评分时给今天打卡
   // RD = {week 哪一周, lo、hi 第几周到第几周, cards 卡片}；roundReq：取卡的请求编号（学生转去做别的时作废旧请求）；roundNone：哪一周取到 0 张卡
-  let RD = null, roundBusy = false, roundReq = 0, roundNone = null;
+  let RD = null, roundBusy = false, roundReq = 0, roundNone = null, revStale = false;
   // 复习本轮的打卡：每次评分记下「哪一周、哪一天」要打卡，每一条单独存进这个浏览器（名字＝学生摘要＋周＋日，不存钥匙），
   // 服务器确认记上了那一天才删掉那一条；每次用时都重新扫一遍（另一个标签页存的也算）。存不进浏览器的只记在页面里（memMk），并提醒先别关页。
   // 关页重开、再复习一遍、下一次评分都会接着补。每一天单独发、单独确认（过了半夜两天各记各的）
   const PMK = 'vocab_rmark_' + (() => { let h = 7; for (const ch of KEY) h = (h * 31 + ch.charCodeAt(0)) | 0; return (h >>> 0).toString(36); })() + '_';
   const memMk = new Map(), mkSending = new Set(), mkDone = new Set();   // 存不进浏览器的；正在发的；服务器已经确认的（周|日）
   let mkErr = '';
-  let revDone = new Set();
+  // 第 39 步：复习本轮的进度（数据库跑过第 39 步才有：取卡的回复带 goal）。这一轮第一次复习某个词时记下「哪一周、哪一天、哪个词」，
+  // 每个词单独一条存进这个浏览器（名字＝前缀＋周＋日＋词号，不存钥匙；另一个标签页存的也算、只删自己确认的那一条），
+  // 按「周＋日」一起发给服务器（act＝done，顺带给那天打卡，和 mark 一样）；服务器确认了才删。存不进浏览器的只记在页面里（memRd）
+  const PRD = 'vocab_rdone_' + PMK.slice(12), memRd = new Map(), rdSending = new Set();
+  // rdOk：这个页面里服务器确认过的「哪一周|哪个词 → 第一次复习的那天」（每次记进度的回复都并进来、取最早的那天）。
+  //   只用来判断评分时这个词还要不要逐词记（rvOk）；页面上显示的「已经复习」只看 D.rg.done（见 rgPick、rgNow）
+  const rdOk = new Map();
+  let rdErr = '', rdOff = false;   // rdOff：服务器不认 done（数据库还没跑第 39 步）：这个页面里只打卡，和以前一样
+  let revDone = new Map();   // 今天复习过的：词 → 评分时页面上的「今天」（第 39 步改成按日子记：换日时只清以前日子的，见 revPrune）
   let listView = false, pin = null;                                    // 「看本周全部词」列表；pin = 从列表里点的那张卡（排在最前面）
   let saving = false, starting = false, submitting = false, syncing = false, stored = true, canStore = true, stale = null, lastSync = Date.now();
   let T = null, ans = [], qi = 0;                                      // 进行中的测验
@@ -68,31 +76,89 @@ const Stu = (() => {
   };
   const forget = id => { memAns.delete(id); memRes.delete(id); unsaved.delete(id); try { localStorage.removeItem(lsKey(id)); } catch (e) {} };
 
+  // 第 39 步：换了日子，只清以前日子评过的「今天复习过的」（后台读到新的一天以后、学生在新的一天已经评过的留着，做完回来不会再出）
+  function revPrune(day) { for (const [id, d] of revDone) if (d !== day) revDone.delete(id); }
   // 换上新数据：日期变了就清掉「今天复习过的」；换周了就清掉已经过期的那些卷子的答案和关页提醒
   function apply(d) {
-    if (D && D.week && d.week && d.week.today !== D.week.today) { revDone = new Set(); if (mode === 'rev') mode = 'new'; }
+    if (D && D.week && d.week && d.week.today !== D.week.today) { revPrune(d.week.today); if (mode === 'rev') mode = 'new'; }
+    applyData(d, false);
+  }
+  // 第 39 步：只换数据（quiet：后台重新读取落地时学生已经换了页签、学习方式或者翻了卡）——不动现在的学习方式、队列、正反面、不重画；
+  //   换了日子要清的「今天复习过的」，等下一次换学习方式（resetQueue）时再清
+  function applyData(d, quiet) {
+    if (quiet && D && D.week && d.week && d.week.today !== D.week.today) revStale = true;
     if (D && D.week && d.week && d.week.id !== D.week.id) for (const [tid, wid] of [...unsaved]) if (wid !== d.week.id) { unsaved.delete(tid); memAns.delete(tid); }
+    d.rg = rgFull(d.rg, d._rq, d.week && d.week.id);   // 第 39 步：回顾周的目标（学生页读取是「完整读取」，见 rgFull、rgPick）
     D = d; stale = null; lastSync = Date.now();
     exSetKinds(d.ex || null);   // 拓展例句哪几类开着（第 34 步起学生页读取会给）：所有卡片同步
   }
-  function start(d) { apply(d); resetQueue(); render(); flushMarks(); seenRetry(); }   // 上次没确认的打卡、没报上的「看过」：打开页面就补
+  // 第 39 步：回顾周「已经复习了几个」只有一个来源——D.rg.done：服务器确认过的、属于本轮词单（rk，服务器按本轮的词号算的指纹）的「词 → 第一次复习的那天」。
+  // 新到一份目标（学生页读取、点「复习本轮」取卡、记进度、跨天重新取卡的回复都带）时：
+  //   · 换了周（start 不同）：用新的。
+  //   · 本轮词单变了（rk 不同，比如老师停用了词、改了学法）：不比时刻，只认「完整读取」（full：学生页读取、点「复习本轮」取卡，见 rgFull）——用它那份、丢掉旧词单的累积；
+  //     记进度的回复里词单不一样：一律不改显示（只用来确认浏览器里没确认的记录），也不自动重新读取，只提示一句，等下一次完整读取。
+  //   · 同一份词单：按词号累积（同一个词取最早的那天），只增不减（服务器上的进度本来就只增不减）；天数、每天几个这些设置取 ts 较晚的那份。
+  function rgPick(old, nw, full) {
+    const obj = g => !!g && typeof g === 'object', t = g => Number.isFinite(g.ts) ? g.ts : -1;
+    if (!obj(nw)) return full ? nw : old;
+    if (!obj(old) || old.start !== nw.start) return nw;
+    if (old.rk !== nw.rk || !obj(old.done) || !obj(nw.done)) return full ? nw : old;
+    const done = Object.assign({}, old.done);
+    for (const id in nw.done) { const d = nw.done[id]; if (typeof d === 'string' && d && (!done[id] || d < done[id])) done[id] = d; }
+    return Object.assign({}, t(nw) < t(old) ? old : nw, { done });
+  }
+  // 请求编号（rgSent：学生页读取、点「复习本轮」取卡、记进度，发出时各拿一个，越晚发的越大）；rgSeen：用过的最晚发出的完整读取。
+  // 完整读取（学生页读取、取卡）带回的目标：比用过的那次晚发出的才算数（换词单、换设置都按它）；早发出、晚回来的只并同一份词单的进度（rgPick 的规则）。
+  //   取到过 0 张卡（roundNone）以后，晚发出的完整读取明确本轮有词：清掉 0 张的标记，「复习本轮」照常能进
+  let rgSent = 0, rgSeen = 0, rgDiff = false, roundNoneRq = 0;
+  function rgFull(g, rq, wk) {
+    const old = D ? D.rg : undefined;
+    if (!Number.isFinite(rq) || rq < rgSeen) return rgDone(old, g);   // 较早发出的：只并同一份词单的逐词进度，天数这些设置不换
+    rgSeen = rq; rgDiff = false;
+    if (roundNone && roundNone === wk && rq > roundNoneRq && g && typeof g === 'object' && num(g.n) > 0) roundNone = null;
+    return rgPick(old, g, true);
+  }
+  // 只并逐词进度：同一周、同一份词单才把 nw 的 done 并进 old（同一个词取最早的那天），其余都按 old
+  function rgDone(old, nw) {
+    const obj = g => !!g && typeof g === 'object';
+    if (!obj(old)) return nw;   // 手上还没有：先用它
+    if (!obj(nw) || old.start !== nw.start || old.rk !== nw.rk || !obj(old.done) || !obj(nw.done)) return old;
+    return Object.assign({}, old, { done: rgPick(old, nw, false).done });
+  }
+  // 记进度的回复带的目标（不是完整读取）：同一份词单就并进来；词单指纹和手上的不一样、而且这次记进度是在用过的完整读取之后发出的（老师在这之后改了本轮的词）：
+  //   不改显示、不自动重新读取，只在目标那一行提示「本轮的词有变化」（rgDiff），等学生去「进度」页、点「复习本轮」这类正常的完整读取
+  function rgTake(g, rq) {
+    const old = D.rg;
+    D.rg = rgPick(old, g, false);
+    if (old && typeof old === 'object' && old.start === g.start && old.rk !== g.rk && rq > rgSeen) rgDiff = true;
+  }
+  function start(d) { if (!Number.isFinite(d._rq)) d._rq = ++rgSent; apply(d); resetQueue(); render(); flushMarks(); flushRound(); seenRetry(); }   // 上次没确认的打卡、复习本轮的进度、没报上的「看过」：打开页面就补
   // 读取一次：比后面发出的请求还晚回来的、比页面上已经显示的日期或周还旧的，都不用（返回 null）
   const behind = d => !!(D && D.week && d.week && (d.week.today < D.week.today || (d.week.today === D.week.today && d.week.no < D.week.no)));
   async function load() {
-    const my = ++loadSeq, sent = Date.now();
+    const my = ++loadSeq, sent = Date.now(), rq = ++rgSent;   // rq：第 39 步回顾周目标用的请求编号（和取卡、记进度共用，见 rgFull）
     const d = await rpc('stu_load', { cv: CV }, { obj: true });
     if (my < loadOk || behind(d)) return null;
-    loadOk = my;
+    loadOk = my; d._rq = rq;
     const ids = new Set((d.errbook || []).map(c => c.id));
     for (const [id, at] of errNew) if (ids.has(id) || at < sent) errNew.delete(id);
     return d;
   }
   // 重新读取；失败时保留现在的词单，页面上给一个「重新读取」
-  async function reload(failMsg) {
-    try { const d = await load(); if (d) { apply(d); resetQueue(); render(); } return true; }
-    catch (e) { stale = (failMsg || '重新读取没成功') + '（' + e.message + '）'; render(); return false; }
+  // bg：回复触发的后台重新读取（服务器已经是新的一天、补记了以前的打卡等）——落地那一刻学生已经换了页签、学习方式、翻了卡、换了一张卡：只换数据，不重画、不动队列；
+  //   页面没变：和从后台回来时的核对一样（newer：换日、换周照常更新，同一天只更新数据、正在学的这一轮不打乱）；读不到也不打扰
+  const view = () => [tab, mode, RD ? RD.sess : 0, flipped, queue[0] || '', listView, T ? T.id : '', PR ? PR.id : ''].join('|');
+  async function reload(failMsg, bg) {
+    const v0 = bg ? view() : null;
+    try {
+      const d = await load();
+      if (d) { if (!bg) { apply(d); resetQueue(); render(); } else if (view() !== v0) applyData(d, true); else newer(d); }
+      return true;
+    }
+    catch (e) { if (bg) return false; stale = (failMsg || '重新读取没成功') + '（' + e.message + '）'; render(); return false; }
   }
   function resetQueue() {
+    if (revStale) { revStale = false; revPrune(D.week.today); }   // 第 39 步：后台读到了新的一天（只换了数据）：换学习方式时才清以前日子的「今天复习过的」（新的一天已经评过的留着）
     // 复习本轮进行中：重新读取、换日都不打断（还是这一周就接着复习）；换周了就退出
     if (mode === 'round') { if (RD && D && D.week && RD.week === D.week.id) return; mode = 'new'; RD = null; }
     queue = (mode === 'rev' ? revLeft() : mode === 'all' ? cards() : todo()).map(c => c.id); flipped = false; again = new Set();
@@ -110,21 +176,24 @@ const Stu = (() => {
     if (weekChanged) {
       if (T && T.week !== d.week.id) { T = null; toast('上一周的测验已经结束（没交的没有记成绩），现在是第 ' + d.week.no + ' 周'); }
       else if (!d.week.waiting) toast('已经到第 ' + d.week.no + ' 周了');
-      mode = 'new'; RD = null; revDone = new Set(); apply(d); resetQueue(); render(); return;
+      mode = 'new'; RD = null; revDone = new Map(); apply(d); resetQueue(); render(); return;
     }
     if (dayChanged) {
       apply(d); if (!T) { resetQueue(); render(); }
-      toast('新的一天，今天的复习和任务已经更新'); return;
+      toast('新的一天，今天的复习和任务已经更新');
+      if (mode === 'round' && RD && RD.week === d.week.id && RD.v39 && RD.sday !== d.week.today) { RD.newDay = true; if (!T && !(tab === 'study' && flipped)) render(); }   // 第 39 步：这一轮的卡是以前的日子取的：复习本轮上面提示「点这里接着复习」（学生点了才重新取卡）
+      return;
     }
     // 同一天：别的设备可能学过。词单没变就只更新每张卡的状态，正在学的这一轮顺序不打乱
     const ids = x => (x.cards || []).map(c => c.id).join();
     if (ids(d) !== ids(D) || mode === 'rev') {
-      if (T || (tab === 'study' && flipped)) { ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'myplan', 'plans', 'req', 'ex', 'drill', 'wl', 'lq'].forEach(k => D[k] = d[k]); exSetKinds(d.ex || null); lastSync = Date.now(); return; }   // tday 和 review 是同一次读到的，要换一起换（这里不换 review，tday 也不换）
+      if (T || (tab === 'study' && flipped)) { ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'myplan', 'plans', 'req', 'ex', 'drill', 'wl', 'lq'].forEach(k => D[k] = d[k]); D.rg = rgFull(d.rg, d._rq, d.week.id); exSetKinds(d.ex || null); lastSync = Date.now(); return; }   // tday 和 review 是同一次读到的，要换一起换（这里不换 review，tday 也不换）
       apply(d); resetQueue(); render(); return;
     }
     const by = Object.fromEntries(d.cards.map(c => [c.id, c]));
     cards().forEach(c => { const n = by[c.id]; if (n) Object.assign(c, { st: n.st, done: n.done, again: n.again, wrong: n.wrong }); });
     ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'review', 'week', 'myplan', 'plans', 'req', 'ex', 'drill', 'wl', 'lq', 'tday'].forEach(k => D[k] = d[k]);
+    D.rg = rgFull(d.rg, d._rq, d.week.id);   // 第 39 步：回顾周的目标（学生页读取是「完整读取」）
     exSetKinds(d.ex || null);   // 同一天的局部重读也带上新的开关状态
     lastSync = Date.now();
     // 从列表里点过来、排在最前面的那张卡（可能已经练过）留在最前面
@@ -261,24 +330,29 @@ const Stu = (() => {
     const n = revLeft().length;
     if (!D.cfg.srsOn || mode === 'rev') return '';
     if (!n) return (D.review || []).length ? '<div class="note">今天该复习的词都复习完了。</div>' : '';
-    return '<div class="box"><h2>今天先复习 ' + n + ' 个 <small>学过的词按遗忘曲线回来；每次点「会了」，下次隔得更久（1、2、4、7、15 天）</small></h2><div><button class="btn main" data-act="rev">先复习这 ' + n + ' 个</button></div></div>';
+    const ck = revLeft().filter(c => c.chk).length;   // 第 39 步：其中一个月后抽查的词
+    return '<div class="box"><h2>今天先复习 ' + n + ' 个 <small>学过的词按遗忘曲线回来；每次点「会了」，下次隔得更久（1、2、4、7、15 天）</small></h2>' +
+      (ck ? '<div class="muted small">其中 ' + ck + ' 个是「抽查」：以前已经复习熟（5 次都「会了」）的词，隔了一段时间再看看还记不记得（不算新学）。</div>' : '') +
+      '<div><button class="btn main" data-act="rev">先复习这 ' + n + ' 个</button></div></div>';
   }
   function studyHTML() {
     const w = D.week;
     if (w.waiting || w.today < w.start) return '<div class="box"><h2>还没开始</h2><div class="muted">第 1 周从 ' + md(w.start) + ' 开始，到时候再来。</div></div>';
     if (mode === 'rev') {
       if (!queue.length) return '<div class="card"><h2>今天的复习做完了</h2><div class="muted">「会了」的词会隔得越来越久再出现；「不会」「不太确定」的明天再来。</div><div class="form"><button class="btn main" data-act="back">' + (w.kind === 'L' && todo().length ? '继续学本周的词' : '好的') + '</button>' + groupBtn() + '</div></div>';
-      return cardHTML(pool().find(x => x.id === queue[0]), '复习');
+      const rc = pool().find(x => x.id === queue[0]);
+      return cardHTML(rc, rc && rc.chk ? '抽查' : '复习');   // 第 39 步：一个月后抽查的词标「抽查」
     }
     if (mode === 'round') return roundHTML();
     const top = taskHTML() + revBox();   // 第 37 步：最上面是「本周任务」（点开看明细）
-    if (w.kind === 'R') return top + (roundNone === w.id
+    if (w.kind === 'R') { const g = rgNow(), gl = g ? g.n - g.before - g.today : 0; return top + (noRound()
       // 0 张：只说本轮没有可复习的词；回顾测和别的测验合成一场时，再叫学生去「测验」看安排（单独一场回顾测没有题，不叫学生去考）
       ? '<div class="box"><h2>这周是回顾周</h2><div class="muted">这周不学新词。本轮没有可复习的词。' + revGuide() + '</div>' + markNote() +
         (revMerged() ? '<div class="form"><button class="btn" data-tab="test">' + revBtn() + '</button></div>' : '') + '</div>'
-      : '<div class="box"><h2>这周是回顾周</h2><div class="muted">这周不学新词。先把这一轮学过的词翻卡复习一遍，再去「测验」做' + revTxt() + '。复习本轮不算成绩，回顾测才算。</div>' + markNote() +
-        '<div class="form"><button class="btn main" data-act="round">复习本轮学过的词</button><button class="btn" data-tab="test">' + revBtn() + '</button></div></div>') +
-      (D.errbook.length ? '<div class="box"><h2>先看看错过的词</h2><div class="muted">一共 ' + D.errbook.length + ' 个，在「错词本」里。</div><div><button class="gbtn" data-tab="err">打开错词本</button></div></div>' : '');
+      : '<div class="box"><h2>这周是回顾周</h2><div class="muted">这周不学新词。先把这一轮学过的词翻卡复习一遍，再去「测验」做' + revTxt() + '。复习本轮不算成绩，回顾测才算。</div>' +
+        (g ? '<div class="rgl">' + rgLine(g) + '</div>' : '') + markNote() +   // 第 39 步：今天的目标
+        '<div class="form"><button class="btn main" data-act="round"' + (g && gl <= 0 && g.n ? ' data-all="1">再复习一遍本轮' : g && g.before + g.today > 0 ? '>接着复习本轮（还剩 ' + gl + ' 个）' : '>复习本轮学过的词') + '</button><button class="btn" data-tab="test">' + revBtn() + '</button></div></div>') +
+      (D.errbook.length ? '<div class="box"><h2>先看看错过的词</h2><div class="muted">一共 ' + D.errbook.length + ' 个，在「错词本」里。</div><div><button class="gbtn" data-tab="err">打开错词本</button></div></div>' : ''); }
     if (!cards().length) return top + '<div class="box"><h2>这周没有新词</h2><div class="muted">' + (rangeEmpty() ? '你的学习范围（' + esc(rangeLv().join('、')) + '）还没有放进词库，老师放进去以后，打开这个页面就会自动发词。' : '可能是这个范围的词已经全部学完了，或者老师给你暂停了一周。') + '</div></div>';
     if (listView) return listHTML();
     if (!queue.length) {
@@ -298,14 +372,81 @@ const Stu = (() => {
   // 复习本轮：上面一行写清范围、不算成绩；复习完了给「去回顾测」「再复习一遍」
   function roundHTML() {
     const n = RD.cards.length, a = RD.lo, z = RD.hi - 1, rng = a < z ? '第 ' + a + '～' + z + ' 周' : a === z ? '第 ' + a + ' 周' : '这一轮';
+    const g = RD.v39 ? rgNow() : null;   // 第 39 步：今天的目标（数据库跑过第 39 步才有）
     if (!queue.length) {
       const tested = (D.tests || []).some(x => x.done && (x.parts || []).includes('review'));
-      return '<div class="card"><h2>本轮的 ' + n + ' 个词复习完了</h2><div class="muted">复习本轮不算成绩，回顾测才算。' + (tested ? '回顾测已经考完了。' : '准备好了就去「测验」做' + revTxt() + '。') + '</div>' + markNote() +
-        '<div class="form">' + (tested ? '' : '<button class="btn main" data-tab="test">' + revBtn() + '</button>') + '<button class="btn" data-act="round">再复习一遍</button>' + groupBtn() + '<button class="btn" data-act="back">返回</button></div></div>';
+      return '<div class="card"><h2>本轮的 ' + n + ' 个词' + (g && !RD.all ? '都复习过了' : '复习完了') + '</h2><div class="muted">复习本轮不算成绩，回顾测才算。' + (tested ? '回顾测已经考完了。' : '准备好了就去「测验」做' + revTxt() + '。') + '</div>' + markNote() + newDayNote() +
+        '<div class="form">' + (tested ? '' : '<button class="btn main" data-tab="test">' + revBtn() + '</button>') + '<button class="btn" data-act="round" data-all="1">再复习一遍</button>' + groupBtn() + '<button class="btn" data-act="back">返回</button></div></div>';
     }
-    return (flipped ? '' : '<div class="wkline"><span class="muted">复习本轮：' + rng + '学过的 ' + n + ' 个词 · 不算成绩，回顾测才算</span><button type="button" class="gbtn" data-act="back">结束复习</button></div>') +
+    // 第 39 步：这一次复习里做到了今天的目标：停一下，告诉学生做完了（只是目标，可以接着往后复习）；同一天只停一次
+    if (goalStop()) {
+      const pend = rdPend(RD.week), left = RD.cards.filter(c => !(c.rv || pend.get(c.id))).length;
+      return '<div class="card"><h2>今天的目标完成了</h2><div class="muted">今天复习了 ' + g.today + ' 个（今天的目标 ' + g.target + ' 个）。' +
+        (left ? '本轮还有 ' + left + ' 个没复习，可以接着往后复习，也可以明天再来。' : '本轮的词都复习过了。') + '复习本轮不算成绩，回顾测才算。</div>' + markNote() + newDayNote() +
+        '<div class="form"><button class="btn main" data-act="rgo">接着往后复习</button><button class="btn" data-act="back">今天先到这里</button></div></div>';
+    }
+    return (flipped ? '' : '<div class="wkline"><span class="muted">复习本轮：' + rng + '学过的 ' + n + ' 个词 · ' + (g ? rgLine(g, true) + ' · ' : '') + '不算成绩，回顾测才算</span><button type="button" class="gbtn" data-act="back">结束复习</button></div>' + newDayNote()) +
       cardHTML(RD.cards.find(x => x.id === queue[0]), '复习本轮') + markNote();
   }
+  // 第 39 步：复习本轮的页面开着跨了一天：提示学生点一下接着复习（重新取一次本轮的卡：服务器记下今天取过卡，今天复习的进度断网后隔天补发才有依据）
+  const newDayNote = () => RD && RD.newDay ? '<div class="note" id="rnewnote">已经是新的一天了：<button type="button" class="gbtn" data-act="rnew">点这里接着复习</button>（重新取一次本轮的卡，位置不变；现在没连上网的话，最好今天连上网再点）</div>' : '';
+  // ── 第 39 步：回顾周每天的目标（和数据库 app.round_goal 同一个算法）──
+  // 复习本轮停在「今天的目标完成了」那一页：做到了今天的目标、今天还没点过「接着往后复习」、还有卡、卡在正面。
+  // 停在这一页时不翻面（翻面、空格、回车都不会露出下一张卡的背面）；空格、回车＝点「接着往后复习」
+  function goalStop() {
+    if (mode !== 'round' || !RD || !RD.v39 || flipped || !queue.length || !D || !D.week) return false;
+    const g = rgNow(), today = tokyoToday() || D.week.today;
+    return !!(g && g.target > 0 && g.today >= g.target && RD.goalDay !== today);
+  }
+  function goalGo() { if (mode === 'round' && RD) { RD.goalDay = tokyoToday() || D.week.today; render(); window.scrollTo({ top: 0 }); } }
+  // 每天约 ⌈本轮总数 ÷ 分几天⌉ 个，第 N 天累计到 N 倍（最多到本轮总数，第「分几天」天以后＝全部）；今天的目标＝今天累计该到的 − 今天以前复习过的（不小于 0）
+  function rgCalc(n, days, start, today, before, tdone) {
+    if (!days) return { n, days: 0, before, today: tdone, target: null };
+    const di = Math.min(days, Math.max(1, dayN(start, today) + 1)), per = Math.ceil(n / days);
+    return { n, days, di, per, before, today: tdone, target: Math.max(0, Math.min(n, per * di) - before) };
+  }
+  // 这一周还没确认的「复习过了」：词 → 那天
+  const rdPend = wid => { const m = new Map(); for (const x of rdList()) if (x.w === wid && (!m.has(x.id) || x.d < m.get(x.id))) m.set(x.id, x.d); return m; };   // 同一个词存了几天（几个标签页、跨天）：取最早的那天
+  // 这一轮里某个词服务器已经确认过的第一次复习的那天（取到的卡上的 rv、这一页确认过的、目标里的 done）：评分时查一个词用。
+  // 只有还没确认的（浏览器里存着、还没发出去或者还没回复）不算：那一条可能因为那天没有取卡依据被拒，今天这次评分要照样存一条（同一个词同一天只存一条，服务器取最早的有效日子）
+  const rvOk = id => {
+    if (!RD) return null;
+    const c = RD.cards.find(x => x.id === id), g = D.rg && typeof D.rg === 'object' && D.rg.done && typeof D.rg.done === 'object' ? D.rg.done[id] : null;
+    return (c && c.rv) || rdOk.get(RD.week + '|' + id) || (typeof g === 'string' && g) || null;
+  };
+  // 现在的目标：「已经复习」＝D.rg.done（见 rgPick，服务器确认过的、属于本轮词单的），按今天的日子分「以前／今天」；
+  // 再加上浏览器里还没确认的（断网、回复还没到）——只算这一页手上本轮的卡里的（点「复习本轮」时和目标是同一份词单 rk 取到的）、服务器还没确认的词；
+  // 别的（取卡以后词单变了、这一页还没取过卡）不算进去，只提示「另有 N 个待确认」（wait），交给服务器裁定。
+  // （服务器已经记上、回复丢了的词：已经在 done 里，就不再算浏览器里那一条，同一个词只算一次）
+  // 万一只有汇总数（没有逐词的 done，旧数据库）：照旧用汇总数，没确认的只提示
+  const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  function rgNow() {
+    const w = D.week, g = D.rg; if (!w || w.kind !== 'R' || w.waiting || !g || typeof g !== 'object' || !Number.isFinite(Number(g.n))) return null;
+    const today = tokyoToday() || w.today, pend = rdPend(w.id);
+    let b = num(g.before), t = num(g.today), wait = 0;
+    if (g.done && typeof g.done === 'object') {
+      b = 0; t = 0;
+      for (const id in g.done) { const d = g.done[id]; if (typeof d !== 'string' || !d) continue; if (d < today) b++; else t++; }
+      const ids = RD && RD.week === w.id && RD.ids && RD.rk === g.rk ? RD.ids : null;
+      for (const [id, d] of pend) { if (hasOwn(g.done, id)) continue; if (ids && ids.has(id)) { if (d < today) b++; else t++; } else wait++; }
+    } else {
+      if (today > w.today) { b += t; t = 0; }
+      wait = pend.size;
+    }
+    return Object.assign(rgCalc(num(g.n), num(g.days), g.start || w.start, today, b, t), { wait });
+  }
+  // 目标后面的小字：浏览器里还有没确认的（交给服务器裁定）；记进度时发现本轮的词有变化（等下一次完整读取）
+  const rgTail = g => (g.wait ? '（另有 ' + g.wait + ' 个待确认）' : '') + (rgDiff ? '（本轮的词有变化，去「进度」页，或点「复习本轮」后更新）' : '');
+  // 一句话：今天的目标 N 个、已完成 M 个（short：复习本轮上面那一行用）
+  function rgLine(g, short) {
+    const all = g.before + g.today, left = Math.max(0, g.n - all), wt = rgTail(g);
+    if (g.target === null) return '本轮 ' + g.n + ' 个，已经复习 ' + all + ' 个' + wt + (short ? '' : '（不分天，什么时候复习都行）');
+    if (!left) return '本轮的词都复习过了' + wt + (short ? '' : '（' + g.n + ' 个），可以再复习一遍');
+    const head = (g.target > 0 ? '今天的目标 <b>' + g.target + '</b> 个，已完成 <b>' + g.today + '</b> 个' + (g.today >= g.target ? '（完成了）' : '') : '今天的目标已经提前完成了（已完成 <b>' + g.today + '</b> 个）') + wt;
+    return head + (short ? '' : '<div class="small muted">本轮 ' + g.n + ' 个分 ' + g.days + ' 天，每天约 ' + g.per + ' 个；已经复习 ' + all + ' / ' + g.n + '。只是目标，不锁：做完了可以接着往后复习</div>');
+  }
+  // 本轮没有可复习的词：点过「复习本轮」取到 0 张，或者学生页读到本轮 0 个（第 39 步起有）
+  const noRound = () => !!(D && D.week && (roundNone === D.week.id || (D.week.kind === 'R' && D.rg && typeof D.rg === 'object' && num(D.rg.n, -1) === 0)));
   // 这周回顾测的那一场（可能和季度测、年测合成一场）：名称、及格线和「测验」页一样
   const revT = () => (D.tests || []).find(x => (x.parts || [x.kind]).includes('review'));
   const revMerged = () => { const x = revT(); return !!x && (x.parts || []).length > 1; };
@@ -314,11 +455,15 @@ const Stu = (() => {
   const revGuide = () => revMerged() ? '这周的回顾测和' + revT().parts.filter(p => p !== 'review').map(p => KN[p]).join('、') + '合成一场，去「测验」看安排。' : '';
   // 复习本轮的打卡：还有没确认的打卡时显示（正在记／没记上＋重试打卡）
   function markNote() {
-    const p = mkList(); if (!D || !D.week || !p.length) return '';
-    if (memMk.size) return '<div id="mkst" class="warnbox">这条打卡还没保存在浏览器，先别关页，联网后点重试<button type="button" class="gbtn" data-act="remark">重试打卡</button></div>';
-    if (p.every(x => mkSending.has(mkId(x)))) return '<div id="mkst" class="muted small center">正在记打卡…</div>';
-    const days = p.map(x => x.d === D.week.today ? '今天' : md(x.d)).join('、');
-    return '<div id="mkst" class="warnbox">' + esc(days) + '的打卡还没记上' + (mkErr ? '（' + esc(mkErr) + '）' : '') + '<button type="button" class="gbtn" data-act="remark">重试打卡</button></div>';
+    if (!D || !D.week) return '';
+    // 第 39 步：复习本轮的进度（还没确认的）也在这里说：按「周＋日」算一条，和打卡合在一起
+    const p = mkList(), q = new Map(); for (const x of rdList()) q.set(x.w + '|' + x.d, x);
+    if (!p.length && !q.size) return '';
+    const what = q.size ? '复习进度和打卡' : '打卡';
+    if (memMk.size || memRd.size) return '<div id="mkst" class="warnbox">这条' + what + '还没保存在浏览器，先别关页，联网后点重试<button type="button" class="gbtn" data-act="remark">重试打卡</button></div>';
+    if (p.every(x => mkSending.has(mkId(x))) && [...q.keys()].every(g => rdSending.has(g))) return p.length ? '<div id="mkst" class="muted small center">正在记打卡…</div>' : '';   // 复习进度每评一个就发一次：正在发的时候不显示（免得每张卡下面闪一下），没记上才提示
+    const ds = [...new Set(p.map(x => x.d).concat([...q.values()].map(x => x.d)))].sort(), days = ds.map(d => d === D.week.today ? '今天' : md(d)).join('、'), er = mkErr || rdErr;
+    return '<div id="mkst" class="warnbox">' + esc(days) + '的' + what + '还没记上' + (er ? '（' + esc(er) + '）' : '') + '<button type="button" class="gbtn" data-act="remark">重试打卡</button></div>';
   }
   // 打卡状态变了：卡片正面直接重画；翻到背面时只换掉那一行（不打断正在播的读音）
   function markShow() {
@@ -340,9 +485,10 @@ const Stu = (() => {
     }
     return '<div class="card">' + cardBack(c) + '</div>' +
       '<div class="bar"><button class="btn no" data-rate="no">不会 <span class="k">1</span></button><button class="btn" data-rate="mid">不太确定 <span class="k">2</span></button><button class="btn ok" data-rate="ok">会了 <span class="k">3</span></button></div>' +
-      '<div class="muted small center">' + (mode === 'round' ? '「不会」「不太确定」的词，这次复习里还会再出现；复习本轮不算成绩，回顾测才算' : '「不会」「不太确定」的词，今天还会再出现') + '</div>';
+      '<div class="muted small center">' + (mode === 'round' ? '「不会」「不太确定」的词，这次复习里还会再出现；复习本轮不算成绩，回顾测才算' : '「不会」「不太确定」的词，今天还会再出现') +
+      (mode === 'rev' && c.chk ? '<br>抽查：「会了」下次间隔翻倍（达到上限后保持）；「不会」「不太确定」就回到每天复习，从第 1 次重新来' : '') + '</div>';   // 第 39 步
   }
-  function flip() { if (!queue.length || flipped || listView || tab !== 'study') return; flipped = true; render(); play(aud(queue[0])); }
+  function flip() { if (!queue.length || flipped || listView || tab !== 'study' || goalStop()) return; flipped = true; render(); play(aud(queue[0])); }   // 第 39 步：停在「今天的目标完成了」时不翻面
   // 先存好再翻到下一张：没存上就留在这张，可以再点一次
   async function rate(a) {
     if (!flipped || !queue.length || saving) return;
@@ -355,13 +501,13 @@ const Stu = (() => {
       try { if (mode === 'rev') await rpc('stu_review', { wid: id, rating: a }); else await rpc('stu_rate', { wid: id, rating: a }); }
       catch (e) {
         saving = false; document.querySelectorAll('[data-rate]').forEach(b => b.disabled = false);
-        if (/不在本周的词单|还没开始|停用|换掉/.test(e.message)) { toast(e.message); reload(); return; }
+        if (/不在本周的词单|还没开始|停用|换掉|做满了/.test(e.message)) { toast(e.message); reload(); return; }   // 第 39 步：抽查停用了、今天的复习或抽查做满了（另一台设备做的）也重新读取
         toast('没存上：' + e.message + '。再点一次试试'); return;
       }
       saving = false;
       // 等回复的时候页面数据已经换过了（重新读取、换日、换周）：新数据里已经是服务器的状态，什么都不改
       if (D !== D0) { render(); return; }
-      if (m0 === 'rev') revDone.add(id);
+      if (m0 === 'rev') revDone.set(id, D.week.today);
       else if (c) { if (c.st === 'assigned') c.st = 'learned'; if (!c.done) { c.done = true; D.week.done = num(D.week.done) + 1; } c.again = a !== 'ok'; }
       if (first) bumpStreak();
       // 换了学习方式、或者队首已经不是这张：只记下结果，不动现在的队列
@@ -369,7 +515,10 @@ const Stu = (() => {
     }
     if (mode === 'round') {   // 评分的这一天要打卡：服务器已经有这一天的记录（学生页读到的、或者确认过的）就不用
       const day = tokyoToday() || D.week.today;
-      if (!(day === D.week.today && D.stats && (D.stats.last30 || []).includes(day))) mkAdd(RD.week, day);
+      if (RD.v39 && !rdOff && day !== RD.cday) RD.newDay = true;   // 第 39 步：页面开着跨了一天：复习本轮上面提示「点这里接着复习」（学生点了才重新取一次卡，这一天才有取卡的依据）
+      // 第 39 步：这一轮第一次复习的词，记下「哪天复习过了」（服务器顺带给那天打卡）；复习过的、数据库还没跑第 39 步的，照旧只打卡
+      if (RD.v39 && !rdOff && !rvOk(id)) { rdAdd(RD.week, day, id); flushRound(); }
+      else if (!(day === D.week.today && D.stats && (D.stats.last30 || []).includes(day))) mkAdd(RD.week, day);
       flushMarks();   // 还有没确认的（以前的、别的标签页的）也一起补发
     }
     stopAudio();
@@ -389,30 +538,61 @@ const Stu = (() => {
   }
   // 复习本轮：点按钮时才读这一轮学过的词（范围和回顾测一样）；读不到、已经不是回顾周就提示
   // 取卡最多等 15 秒；等的时候学生转去做别的（换页签、复习、再过一遍……）这次请求就作废，回来的结果不用
-  async function startRound(btn) {
+  // 第 39 步：数据库跑过第 39 步时（取卡的回复带 goal）从这一轮还没复习过的词接着来；all＝再复习一遍（全部）。都复习过了就直接显示「都复习过了」
+  // 第 39 步：keep＝复习本轮跨了一天、学生点「点这里接着复习」：走同样的取卡，只更新这一轮的卡复习过没有、今天的目标，现在的顺序和位置不动
+  //   （服务器记下今天取过卡）；学生在回复回来以前转去做别的（换页签、换学习方式）：这次请求作废（dropRound），回复什么都不改
+  async function startRound(btn, all, keep) {
     if (roundBusy) return;
-    const my = ++roundReq; roundBusy = true; busy(btn, true);
+    const my = ++roundReq, rq = ++rgSent, rd0 = keep ? RD : null; roundBusy = true; busy(btn, true);
     let r;
     try { r = await rpc('stu_round', { act: 'load' }, { obj: true, timeout: WAIT }); }
     catch (e) {
       if (my !== roundReq) return;
       roundBusy = false; busy(btn, false);
-      if (/不是回顾周|还没开始|过完了|换了/.test(e.message)) { toast(e.message); reload(); } else fail(e);
+      if (/不是回顾周|还没开始|过完了|换了/.test(e.message)) { toast(e.message); reload(); }
+      else if (keep) toast('没连上网（' + e.message + '）：今天复习的进度最好今天连上网再点一次「接着复习」（隔天再补可能记不上）', 5000);
+      else fail(e);
       return;
     }
     if (my !== roundReq) return;
     roundBusy = false;
     if (!D.week || r.week !== D.week.id) { reload(); return; }   // 读的时候已经换周了：重新读取学生页
-    if (!Array.isArray(r.cards) || !r.cards.length) { roundNone = D.week.id; render(); toast('本轮没有可复习的词'); return; }
+    if (keep) {
+      if (mode !== 'round' || RD !== rd0 || !Array.isArray(r.cards)) return;
+      const by = new Map(r.cards.map(c => [c.id, c.rv]));
+      RD.cards.forEach(c => { const v = by.get(c.id); if (typeof v === 'string' && (!c.rv || v < c.rv)) c.rv = v; });
+      RD.ids = new Set(r.cards.map(c => c.id)); RD.rk = r.goal && typeof r.goal === 'object' ? r.goal.rk : RD.rk; RD.cday = tokyoToday() || r.day; RD.sday = r.day; RD.newDay = false;
+      if (r.today) mkDone.add(r.week + '|' + r.day);
+      if (r.goal && typeof r.goal === 'object' && r.day === D.week.today) D.rg = rgFull(r.goal, rq, r.week);
+      render();
+      if (r.day !== D.week.today) reload(null, true);   // 服务器已经是新的一天：后台重新读取（落地时学生换了页面就只换数据）
+      flushMarks(); flushRound();
+      return;
+    }
+    if (!Array.isArray(r.cards) || !r.cards.length) {
+      // 这次请求以后发出的完整读取已经确认本轮有词（这份 0 张是旧的）：不封入口，请学生再点一次
+      if (rq < rgSeen && D.rg && typeof D.rg === 'object' && num(D.rg.n) > 0) { render(); toast('本轮的词刚有变化，再点一次「复习本轮」'); return; }
+      roundNone = D.week.id; roundNoneRq = rq;
+      if (r.goal && typeof r.goal === 'object' && r.day === D.week.today) D.rg = rgFull(r.goal, rq, r.week);
+      render(); toast('本轮没有可复习的词'); return;
+    }
     roundNone = null;
-    RD = { week: r.week, lo: num(r.lo), hi: num(r.hi), cards: r.cards };
+    const v39 = !!(r.goal && typeof r.goal === 'object');
+    RD = { week: r.week, lo: num(r.lo), hi: num(r.hi), cards: r.cards, v39, all: !!all || !v39, goalDay: null, cday: tokyoToday() || r.day, sday: r.day, newDay: false,   // cday、sday：手机上、服务器上取卡的那天；newDay：发现跨了一天（提示「点这里接着复习」）
+      ids: new Set(r.cards.map(c => c.id)), rk: v39 ? r.goal.rk : undefined, sess: ++roundSess };   // ids、rk：这一页手上本轮的卡是哪份词单（rgNow 用）；sess：这一次进入复习本轮的编号（离开、重新进入就换）
     if (r.today) mkDone.add(r.week + '|' + r.day);
-    mode = 'round'; listView = false; pin = null; queue = RD.cards.map(c => c.id); flipped = false; again = new Set();
+    if (v39 && r.day === D.week.today) D.rg = rgFull(r.goal, rq, r.week);   // 服务器刚算的进度和目标（点「复习本轮」取卡也是「完整读取」）
+    const g = v39 ? rgNow() : null, today = tokyoToday() || D.week.today;
+    if (g && g.target !== null && g.today >= g.target) RD.goalDay = today;   // 进来以前就已经做到了今天的目标：这一次不再停下来提示
+    mode = 'round'; listView = false; pin = null; flipped = false; again = new Set();
+    const pend = rdPend(RD.week);   // 浏览器里没确认的只扫一遍
+    queue = RD.all ? RD.cards.map(c => c.id) : RD.cards.filter(c => !(c.rv || pend.get(c.id))).map(c => c.id);   // 直接看这张卡的 rv（不用每张卡再从头找一遍）
     render(); window.scrollTo({ top: 0 });
-    if (r.day !== D.week.today) reload();   // 服务器已经是新的一天：按服务器的日期重新读取（复习接着进行）
-    flushMarks();                            // 上一轮没确认的打卡接着补
+    if (r.day !== D.week.today) reload(null, true);   // 服务器已经是新的一天：后台按服务器的日期重新读取（复习接着进行；落地时学生换了页面就只换数据）
+    flushMarks(); flushRound();              // 上一轮没确认的打卡、复习进度接着补
   }
   const dropRound = () => { if (roundBusy) { roundReq++; roundBusy = false; } };
+  let roundSess = 0;   // 第 39 步：每次点「复习本轮」进入时加 1（RD.sess），后台重新读取落地时用来判断学生还在不在这一次的复习本轮
   const mkId = x => x.w + '|' + x.d;
   // 这个学生所有没确认的打卡：浏览器里存的（每次重新扫，别的标签页存的也算）＋只记在页面里的
   function mkList() {
@@ -439,8 +619,8 @@ const Stu = (() => {
         mkSending.delete(id); mkDrop(x);
         if (r.ok === false) { toast(md(x.d) + (r.why ? '：' + r.why : '的打卡没法补记')); markShow(); return; }   // 没有依据的以前的日子：服务器不记，删掉这一条
         mkDone.add(x.w + '|' + r.day);
-        if (r.today !== D.week.today) { reload(); return; }
-        if (r.day === D.week.today) bumpStreak(); else refreshSide();   // 补记的是前几天：重新读一下连续天数
+        if (r.today !== D.week.today) { reload(null, true); return; }   // 第 39 步改：后台重新读取（落地时学生换了页面就只换数据）
+        if (r.day === D.week.today) bumpStreak(); else reload(null, true);   // 补记的是前几天：重新读一下连续天数
         markShow();
       }, e => {
         mkSending.delete(id);
@@ -452,6 +632,52 @@ const Stu = (() => {
       });
     }
     if (p.length) markShow();
+  }
+  // ── 第 39 步：复习本轮的进度（「哪一周、哪一天、复习过哪个词」）：每个词一条存进浏览器，按「周＋日」一起发（act＝done），确认了才删那几条 ──
+  function rdList() {
+    const out = new Map();
+    try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i), m = k && k.startsWith(PRD) ? k.slice(PRD.length).match(/^(.+?)_(\d{4}-\d{2}-\d{2})_(.+)$/) : null; if (m) out.set(m[1] + '|' + m[2] + '|' + m[3], { w: m[1], d: m[2], id: m[3] }); } } catch (e) {}
+    for (const [k, x] of memRd) out.set(k, x);
+    return [...out.values()];
+  }
+  function rdAdd(w, d, id) { const k = w + '|' + d + '|' + id; try { localStorage.setItem(PRD + w + '_' + d + '_' + id, '1'); memRd.delete(k); } catch (e) { memRd.set(k, { w, d, id }); } }
+  function rdDrop(x) { memRd.delete(x.w + '|' + x.d + '|' + x.id); try { localStorage.removeItem(PRD + x.w + '_' + x.d + '_' + x.id); } catch (e) {} }
+  // 一组（同一周、同一天）同时只发一次，一次最多 200 个；发的时候又复习了的，回来以后接着发。服务器同一个词只记第一次的那天，可以放心重试。
+  // 服务器不认 done（数据库还没跑第 39 步）：这个页面里只打卡（和以前一样）。周过完了、换周了：删掉并提示（和打卡一样）
+  function flushRound() {
+    if (!D || !D.week || $('app').dataset.role === 'adm') return;
+    const groups = new Map();
+    for (const x of rdList()) { const g = x.w + '|' + x.d; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(x); }
+    for (const [g, xs] of groups) {
+      if (rdSending.has(g)) continue;
+      const part = xs.slice(0, 200), w = part[0].w, d = part[0].d;
+      rdSending.add(g); rdErr = ''; const rq = ++rgSent;
+      rpc('stu_round', { act: 'done', wk: w, rd: d, a: { ids: part.map(x => x.id) } }, { obj: true, timeout: WAIT }).then(r => {
+        rdSending.delete(g); part.forEach(rdDrop);
+        // 服务器记的「第一次复习的那天」（同一个词几次补发、几台设备取最早的那天）：已经有的也按服务器的更正（取早的）
+        if (r.rv && typeof r.rv === 'object') for (const id in r.rv) { const v = r.rv[id], k = w + '|' + id; if (typeof v === 'string' && (!rdOk.has(k) || v < rdOk.get(k))) rdOk.set(k, v); }
+        if (RD && RD.week === w && r.rv && typeof r.rv === 'object') RD.cards.forEach(c => { const v = r.rv[c.id]; if (typeof v === 'string' && (!c.rv || v < c.rv)) c.rv = v; });
+        if (D.week && D.week.id === w && r.goal && typeof r.goal === 'object' && r.today === D.week.today) rgTake(r.goal, rq);   // 同一份词单的进度并进来（词单不一样的不改显示，见 rgTake）
+        // 以前的日子服务器没有那天取卡的记录：这一批按那天一个都没记（进度和目标原样），这几条删掉不再发；
+        // 其中别的时候（别的设备、别的日子）已经记上的词照样保留（回复的 rv 里有），没记上的下次复习本轮还会出来
+        if (r.rec === false) toast(md(d) + '的复习进度没法补记（服务器上没有那天复习本轮的记录），已经记上的词仍保留' + (r.ok === false ? '；那天的打卡也没法补记' : ''), 5000);
+        else if (r.ok === false) toast(md(d) + (r.why ? '：' + r.why : '的打卡没法补记'));
+        else { mkDone.add(w + '|' + r.day); mkDrop({ w, d }); }   // 那一天的打卡也记上了
+        if (r.today !== D.week.today) { reload(null, true); return; }   // 服务器已经是新的一天：后台重新读取（落地时学生换了页面就只换数据）
+        if (r.ok !== false) { if (r.day === D.week.today) bumpStreak(); else reload(null, true); }
+        if (xs.length > part.length || rdList().some(x => x.w + '|' + x.d === g)) flushRound();   // 发的时候又复习了的：接着发
+        markShow();
+      }, e => {
+        rdSending.delete(g);
+        if (/不认识这个操作|格式不对/.test(e.message)) { rdOff = true; part.forEach(rdDrop); mkAdd(w, d); flushMarks(); markShow(); return; }   // 数据库还没跑第 39 步：只打卡
+        if (/不在这个回顾周|已经换了|过完了|不是回顾周|还没开始/.test(e.message)) {
+          part.forEach(rdDrop); toast(md(d) + '的复习进度没能记上：' + e.message);
+          if (mode === 'round' && /已经换了|过完了|不是回顾周/.test(e.message)) { reload(); return; }
+        } else rdErr = e.message;
+        markShow();
+      });
+    }
+    if (groups.size) markShow();
   }
   async function more(btn) {
     busy(btn, true);
@@ -839,16 +1065,16 @@ const Stu = (() => {
     else {
       const old = DS || {}, sc = (r.scopes || []).filter(x => x && SCN[x.k]);
       const okSc = k => sc.some(x => x.k === k && x.on && num(x.n) > 0);
-      // 档：学生选过的档（含从词表带过来、现在刷不了、还等着学生重新选的）一直保住，直到学生自己重新选或者点「改成全部档」——
-      // 选过的档现在一个都刷不了时不会悄悄变成「不限档」（那样会刷到别的档），先停住
+      // 档（第 39 步按复查重写）：学生选的全部档（lvWant：从词表带过来的、或者学生自己点的）单独存着，只有学生自己改档、点「改成全部档」才换掉；
+      // 每次读取都按这份完整选择重新算：现在能刷的＝lv（出题只带这些）、暂时刷不了的＝lvGone（提示用，能刷了自动带上）；
+      // 选的档一个都刷不了＝lvBad：先停住等学生重新选（不会悄悄变成「不限档」刷到别的档）
       const okLv = l => (r.lv || []).includes(l);
-      let lvKeep = [...(old.lv || [])].filter(okLv), lvBad = null;
-      if (old.lvBad) { const back = old.lvBad.filter(okLv); if (back.length) lvKeep = back; else lvBad = old.lvBad.slice(); }
-      else if (old.lv && old.lv.size && !lvKeep.length) lvBad = [...old.lv];
+      const lvWant = Array.isArray(old.lvWant) ? old.lvWant.slice() : LV.filter(l => (old.lv && old.lv.has(l)) || (old.lvBad || []).includes(l) || (old.lvGone || []).includes(l));
+      const lvKeep = lvWant.filter(okLv), lvGone = lvWant.filter(l => !okLv(l)), lvBad = lvWant.length && !lvKeep.length ? lvWant.slice() : null;
       // 范围：从词表带过来、但现在不能刷的范围（scopeWant）也一直等着：那个范围恢复了就用它，不然不自动换成别的范围，等学生自己选
       const scopeWant = old.scopeWant && !okSc(old.scopeWant) ? old.scopeWant : null;
       const scope0 = old.scopeWant ? (okSc(old.scopeWant) ? old.scopeWant : null) : okSc(old.scope) ? old.scope : (['learned', 'week', 'err', 'dwrong', 'all'].find(okSc) || null);
-      DS = { opts: r, err: null, scope: scope0, scopeWant, lvBad, lvGone: scopeWant ? old.lvGone || null : null,
+      DS = { opts: r, err: null, scope: scope0, scopeWant, lvWant, lvBad, lvGone: lvKeep.length && lvGone.length ? lvGone : null,
              lv: new Set(lvKeep), t: new Set([...(old.t || [])].filter(t => JN.some(([k]) => k === t) || (t === 'ac' && (acAvail(r) || r.state !== 'ok')))),
              acGone: r.state === 'ok' && !acAvail(r) && ((old.t && old.t.has('ac')) || !!old.acGone),   // 第 38 步：选过听音选意思、老师刚关掉了（学生自己再点题型以前一直提示）
              st: new Set(r.star === false ? [] : (old.st || [])),   // 老师关了「显示档和难度星级」：之前选的星级条件清掉（页面上也不显示这个筛选）
@@ -864,6 +1090,7 @@ const Stu = (() => {
         const p = dPre, x = sc.find(y => y.k === p.scope); dPre = null;
         DS.t = new Set(); DS.st = new Set();
         const want = p.lv || [], lvs = want.filter(l => (r.lv || []).includes(l)), gone = want.filter(l => !lvs.includes(l));
+        DS.lvWant = LV.filter(l => want.includes(l));   // 学生在词表选的全部档（以后每次读取都按这份重算能刷、暂时刷不了的）
         DS.lv = new Set(lvs); DS.lvBad = want.length && !lvs.length ? want.slice() : null; DS.lvGone = lvs.length && gone.length ? gone : null;   // lvGone：带过来、但暂时刷不了的那几档（提示用）
         const scOk = !!x && x.on && num(x.n) > 0;
         DS.scope = scOk ? p.scope : null; DS.scopeWant = scOk ? null : p.scope;
@@ -920,6 +1147,7 @@ const Stu = (() => {
     if (DS.custom !== '' && !want) t += '<br><span class="bad">自己填的题数要在 1～' + mx + ' 之间</span>';
     if (DS.t.has('ac') && DS.st.size) t += '<br><span class="small">「听音选意思」没有难度星级：选了难度，就只出 JLPT 题型</span>';   // 第 38 步
     if (DS.acGone) t += '<br><span class="small">老师暂时关掉了「听音选意思」，题型里已经去掉了</span>';
+    if (DS.lvGone && DS.lvGone.length && DS.lv.size) t += '<br><span class="small">你选的档里 ' + esc(DS.lvGone.join('、')) + ' 暂时刷不了，这次只刷 ' + esc([...DS.lv].join('、')) + '（之后能刷了，再进刷题页会自动带上）</span>';   // 第 39 步
     c.innerHTML = t;
     const zero = cnt && !cnt.err && cnt.state === 'ok' && num(cnt.n) === 0;
     b.disabled = prStarting || !DS.scope || !want || zero;
@@ -1232,13 +1460,15 @@ const Stu = (() => {
   }
   // 那一次是哪天：只写试卷上能核实的——交卷时判错的写交卷那天；当场答错的只知道在开考和交卷之间（同一天就是那天）；没交卷的只知道开考以后
   function occDay(o) {
+    if (o[1] === 'chk') return (o[5] ? md(o[5]) : '') + '一个月后抽查时没想起来';   // 第 39 步
     const d1 = o[5], d2 = o[6];
     if (!o[3]) return d2 ? md(d2) + '交卷时判错' : '具体答错日期不明';
     if (!o[4]) return d1 ? md(d1) + '开考以后当场答错（没交卷）' : '当场答错（没交卷），具体日期不明';
     if (d1 && d2) return d1 === d2 ? md(d1) + '当场答错' : md(d1) + '～' + md(d2) + '之间当场答错';
     return '当场答错，具体日期不明';
   }
-  const occTxt = o => '第 ' + num(o[0]) + ' 周 ' + partsName(o[1]) + ' · ' + occDay(o) + (o[2] ? ' · ' + tName2(o[2]) : '');
+  // 第 39 步：一个月后抽查时没想起来、记进了错词本的那一次：[第几周, chk, 空, 1, 1, 那天, 那天]
+  const occTxt = o => o[1] === 'chk' ? '第 ' + num(o[0]) + ' 周 · ' + occDay(o) : '第 ' + num(o[0]) + ' 周 ' + partsName(o[1]) + ' · ' + occDay(o) + (o[2] ? ' · ' + tName2(o[2]) : '');
   function esLine(c) {
     if (!has37()) return '';
     const at = ' data-es="' + esc(c.id) + '"';
@@ -1249,7 +1479,7 @@ const Stu = (() => {
       '<div class="muted">共错 ' + s.n + ' 次' + (s.old && s.n > s.old ? '（其中 ' + s.old + ' 次是早期记录，来源和日子都不明）' : '') +
       ' · 最近一次：' + (s.last ? esc(occDay(s.last)) : '具体日期不明') + (s.types.length ? ' · 错在 ' + s.types.map(tName2).join('、') : '') + '</div></div>';
   }
-  const ESRC = [['week', '周测'], ['review', '回顾测'], ['quarter', '季度测'], ['year', '年测'], ['old', '早期记录']];
+  const ESRC = [['week', '周测'], ['review', '回顾测'], ['quarter', '季度测'], ['year', '年测'], ['chk', '一个月后抽查'], ['old', '早期记录']];   // 第 39 步：抽查
   function esPass(c) {
     if (!ESF.src.size && !ESF.t.size) return true;
     const s = esOf(c); if (!s) return ESF.src.has('old') && !ESF.t.size;
@@ -1274,22 +1504,35 @@ const Stu = (() => {
       rows.push(['今天目标', done >= tot && tot ? '本周的词都练过了' : left ? '还差 <b>' + left + '</b> 个' : '已经完成', tot ? '每个学习日约 ' + per + ' 个，今天累计练到 ' + goal + ' 个' : '']);
       sum = !tot ? '这周没有新词' : done >= tot ? '本周的词都练过了' : left ? '今天还差 ' + left + ' 个' : '今天的目标完成了';
       sum += ' · 练过 ' + done + '/' + tot;
-    } else if (roundNone === w.id) {
+    } else if (noRound()) {
       // 已经知道本轮没有可复习的词：和下面的说明一样，只说这一句（单独一场回顾测没有题，不叫学生去考；和季度测、年测合成一场的照实际安排）
       rows.push(['复习本轮', '本轮没有可复习的词', '']);
       sum = '本轮没有可复习的词';
     } else {
-      rows.push(['复习本轮', '这一轮学过的词', '点下面「复习本轮学过的词」']);
+      // 第 39 步：数据库跑过第 39 步时有每天的目标（学生页读取时给 rg）：今天的目标 N 个、已完成 M 个
+      const g = rgNow(), left = g ? Math.max(0, g.n - g.before - g.today) : 0;
+      if (g && g.target !== null) {
+        rows.push(['复习本轮', (!left ? '本轮的词都复习过了' : g.target > 0 ? '今天的目标 <b>' + g.target + '</b> 个，已完成 <b>' + g.today + '</b> 个' + (g.today >= g.target ? '（完成了）' : '') : '今天的目标已经提前完成了（已完成 <b>' + g.today + '</b> 个）') + rgTail(g),
+          '本轮 ' + g.n + ' 个分 ' + g.days + ' 天，每天约 ' + g.per + ' 个；已经复习 ' + (g.n - left) + ' / ' + g.n + '。只是目标，做完可以接着往后复习']);
+        sum = !left ? '本轮都复习过了' : g.target > 0 && g.today < g.target ? '复习本轮：今天 ' + g.today + '/' + g.target : '今天的复习本轮目标完成了';
+      } else if (g) {
+        rows.push(['复习本轮', '本轮 ' + g.n + ' 个，已经复习 ' + (g.n - left) + ' 个', '不分天，什么时候复习都行']);
+        sum = '复习本轮 ' + (g.n - left) + '/' + g.n;
+      } else {
+        rows.push(['复习本轮', '这一轮学过的词', '点下面「复习本轮学过的词」']);
+        sum = '复习本轮，再考回顾测';
+      }
       if (num(w.ncarry)) rows.push(['带过来的错词', num(w.ncarry) + ' 个', '回顾测一起考']);
-      sum = '复习本轮，再考回顾测';
     }
     if (D.cfg.srsOn) {
       const rl = (D.review || []).length, left = revLeft().length, dz = D.tday && Number.isInteger(D.tday.rev) ? D.tday.rev : null;
-      if (dz === null) rows.push(['今天复习', left ? '还剩 ' + left + ' 个' : '今天没有要复习的了', '']);
-      else rows.push(['今天复习', dz + rl ? (dz + rl) + ' 个' : '今天没有要复习的', dz + rl ? '做了 ' + (dz + rl - left) + (left ? '，还剩 ' + left : '') : '']);
+      // 第 39 步：一个月后抽查的词算在「今天复习」里：做了几个（服务器记的）＋还剩几个
+      const ck = (D.tday && Number.isInteger(D.tday.chk) ? D.tday.chk : 0) + (D.review || []).filter(c => c.chk).length, ckTxt = ck ? '（含抽查 ' + ck + ' 个）' : '';   // 和上面的总数同一个算法：今天做过的＋读到的清单
+      if (dz === null) rows.push(['今天复习', left ? '还剩 ' + left + ' 个' : '今天没有要复习的了', ckTxt]);
+      else rows.push(['今天复习', dz + rl ? (dz + rl) + ' 个' + ckTxt : '今天没有要复习的', dz + rl ? '做了 ' + (dz + rl - left) + (left ? '，还剩 ' + left : '') : '']);
     }
     // 单独一场回顾测、本轮没有可复习的词（也就没有题）：不算待完成
-    const noRev = x => !L && roundNone === w.id && !x.started && !x.done && (x.parts || [x.kind]).length === 1 && (x.parts || [x.kind])[0] === 'review';
+    const noRev = x => !L && noRound() && !x.started && !x.done && (x.parts || [x.kind]).length === 1 && (x.parts || [x.kind])[0] === 'review';
     (D.tests || []).forEach(x => {
       if (noRev(x)) { rows.push([tName(x), '本轮没有可复习的词，不用考', '']); return; }
       const st = x.done ? '已交卷：' + num(x.score) + '/' + num(x.total) + ' ' + (x.passed ? '及格' : x.manual ? '老师放行' : '没及格') : x.started ? '考到一半，还没交卷' : '还没开考';
@@ -1782,7 +2025,7 @@ const Stu = (() => {
       if (!DS || PR) return;
       const [set, v] = dfl.dataset.dlv ? [DS.lv, dfl.dataset.dlv] : dfl.dataset.dt ? [DS.t, dfl.dataset.dt] : [DS.st, +dfl.dataset.dst];
       if (set.has(v)) set.delete(v); else set.add(v);
-      if (dfl.dataset.dlv) { DS.lvBad = null; DS.lvGone = null; }   // 学生自己重新选了档
+      if (dfl.dataset.dlv) { DS.lvBad = null; DS.lvGone = null; DS.lvWant = LV.filter(l => DS.lv.has(l)); }   // 学生自己重新选了档：以后按这次选的算
       if (dfl.dataset.dt) DS.acGone = false;
       render(); dCount(); return;
     }
@@ -1805,7 +2048,7 @@ const Stu = (() => {
     if (act === 'qfagain') { if (LQ && LQ.kind === 'flash') { LQ.done = false; LQ.i = 0; LQ.flip = false; qfSave(); render(); window.scrollTo({ top: 0 }); } return; }
     if (act === 'qfbad') { if (LQ && LQ.kind === 'flash') { const mk = qfMarks(), L = LQ.list.filter(w => mk[w.id] === 'n'); if (L.length) { const o = LQ; lqOpen('flash', o.src, L, '标了「不会」的 ' + L.length + ' 个', o.from, o.sig + ':n'); } } return; }
     if (act === 'lqback') { lqBack(); return; }
-    if (act === 'dlvall') { if (DS && !PR) { DS.lvBad = null; DS.lv = new Set(); render(); dCount(); } return; }   // 第 37 步：学生确认改成全部档
+    if (act === 'dlvall') { if (DS && !PR) { DS.lvBad = null; DS.lvGone = null; DS.lvWant = []; DS.lv = new Set(); render(); dCount(); } return; }   // 第 37 步：学生确认改成全部档
     if (act === 'dstart') { if (!DS || PR || T) return; if (dPre) { toast('正在按词表的筛选选好，稍等'); return; } if (DS.lvBad) { toast('先在「档」里重新选'); return; } const want = dWant(); if (!want || !DS.scope) { toast('先选好刷哪些词和题数'); return; } dStart(Object.assign(dArgs(), { n: want }), '刷题'); return; }
     if (act === 'dagain') { if (PR && PR.kind === 'drill' && !PR.busy) dStart({ pid: PR.id }, '再刷一遍做错的'); return; }
     if (act === 'dall') { if (PR && PR.kind === 'drill' && !PR.busy) dStart({ pid: PR.id, all: true }, '再刷一遍这组'); return; }
@@ -1845,8 +2088,10 @@ const Stu = (() => {
     else if (act === 'resync') { if (T && !checking && !submitting) submit(); }
     else if (act === 'retry') { if (T && instant && pend.has(qi) && !answering && !submitting) send(qi, pend.get(qi)); }
     else if (act === 'more') more(a);
-    else if (act === 'round') startRound(a);
-    else if (act === 'remark') flushMarks();
+    else if (act === 'round') startRound(a, a.dataset.all === '1');   // 第 39 步：data-all＝再复习一遍（全部）
+    else if (act === 'rgo') goalGo();   // 第 39 步：做完今天的目标，接着往后复习
+    else if (act === 'rnew') { if (mode === 'round' && RD) startRound(a, RD.all, true); }   // 第 39 步：跨了一天，接着复习（重新取一次本轮的卡，位置不动）
+    else if (act === 'remark') { flushMarks(); flushRound(); }
     else if (act === 'reload') { busy(a, true); reload(); }
     else if (act === 'tstart') tstart(a);
     else if (act === 'prev') { if (!T || submitting) return; qi = Math.max(0, qi - 1); render(); }
@@ -1891,7 +2136,8 @@ const Stu = (() => {
       if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); const d = e.key === 'ArrowRight' ? 1 : -1; if (LQ.kind === 'flash') qfMove(d); else lsJump(d); return; }
       if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (LQ.kind === 'flash') qfFlip(); else if (LQ.playing) lsPause(); else lsPlay(); return; }
     }
-    if (tab === 'study' && !flipped && !listView && (e.key === ' ' || e.key === 'Enter') && queue.length && !e.target.closest('button')) { e.preventDefault(); flip(); }
+    if (tab === 'study' && (e.key === ' ' || e.key === 'Enter') && !e.target.closest('button') && goalStop()) { e.preventDefault(); goalGo(); }   // 第 39 步：停在「今天的目标完成了」：空格、回车＝接着往后复习（不翻面）
+    else if (tab === 'study' && !flipped && !listView && (e.key === ' ' || e.key === 'Enter') && queue.length && !e.target.closest('button')) { e.preventDefault(); flip(); }
     else if (tab === 'study' && flipped && ['1', '2', '3'].includes(e.key)) rate({ 1: 'no', 2: 'mid', 3: 'ok' }[e.key]);
     else if (T && ['1', '2', '3', '4'].includes(e.key) && T.items[qi].o[+e.key - 1] !== undefined) pick(+e.key - 1);
     else if (T && !submitting && e.key === 'ArrowRight' && qi < T.items.length - 1) { qi++; render(); }
