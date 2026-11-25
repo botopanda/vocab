@@ -119,12 +119,12 @@ const Stu = (() => {
     // 同一天：别的设备可能学过。词单没变就只更新每张卡的状态，正在学的这一轮顺序不打乱
     const ids = x => (x.cards || []).map(c => c.id).join();
     if (ids(d) !== ids(D) || mode === 'rev') {
-      if (T || (tab === 'study' && flipped)) { ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'myplan', 'plans', 'req', 'ex', 'drill', 'wl'].forEach(k => D[k] = d[k]); exSetKinds(d.ex || null); lastSync = Date.now(); return; }   // tday 和 review 是同一次读到的，要换一起换（这里不换 review，tday 也不换）
+      if (T || (tab === 'study' && flipped)) { ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'myplan', 'plans', 'req', 'ex', 'drill', 'wl', 'lq'].forEach(k => D[k] = d[k]); exSetKinds(d.ex || null); lastSync = Date.now(); return; }   // tday 和 review 是同一次读到的，要换一起换（这里不换 review，tday 也不换）
       apply(d); resetQueue(); render(); return;
     }
     const by = Object.fromEntries(d.cards.map(c => [c.id, c]));
     cards().forEach(c => { const n = by[c.id]; if (n) Object.assign(c, { st: n.st, done: n.done, again: n.again, wrong: n.wrong }); });
-    ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'review', 'week', 'myplan', 'plans', 'req', 'ex', 'drill', 'wl', 'tday'].forEach(k => D[k] = d[k]);
+    ['map', 'errbook', 'stats', 'class', 'history', 'tests', 'review', 'week', 'myplan', 'plans', 'req', 'ex', 'drill', 'wl', 'lq', 'tday'].forEach(k => D[k] = d[k]);
     exSetKinds(d.ex || null);   // 同一天的局部重读也带上新的开关状态
     lastSync = Date.now();
     // 从列表里点过来、排在最前面的那张卡（可能已经练过）留在最前面
@@ -148,13 +148,19 @@ const Stu = (() => {
     const tabs = [['study', '学习'], ['test', '测验'], ...(drillOn() || tab === 'drill' ? [['drill', '刷题']] : []), ['err', '错词本'], ['map', '进度']];
     return '<header class="top"><div class="wrap">' +
       '<div class="row"><div class="brand"><b>' + esc(D.me.name) + '</b><span>第 ' + w.no + ' 周 · ' + (L ? '学新词' : '回顾周') + ' · ' + md(w.start) + '～' + md(w.end) + (w.extended ? '（已延长）' : '') + '</span></div>' + (D.stats ? '<span class="chip' + (D.stats.streak ? ' ok' : '') + '">连续 ' + D.stats.streak + ' 天</span>' : '') + '</div>' +
-      '<div class="seg" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k || (k === 'map' && tab === 'words')) + '">' + n + (k === 'err' && en ? ' ' + en : '') + '</button>').join('') + '</div>' +   // 全部词表在「进度」里面
+      '<div class="seg" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k || (k === 'map' && (tab === 'words' || tab === 'listen' || tab === 'flash'))) + '">' + n + (k === 'err' && en ? ' ' + en : '') + '</button>').join('') + '</div>' +   // 全部词表、随身听、快刷在「进度」里面
       (L && tot && tab === 'study' && mode !== 'rev' && !w.waiting ? '<div class="prog"><span>本周练过 ' + done + ' / ' + tot + '</span><div class="track"><div class="fill" style="width:' + (done / tot * 100) + '%"></div></div></div>' : '') +
       '</div></header>';
   }
 
+  // 第 38 步：只有画面换到别的东西（换页签、换一题、换一张卡、翻面）时才停掉正在播的声音；同一题、同一张卡重画（判完对错、后台刷新）不打断。
+  // 随身听那一页自己管播放（离开时停）
+  let lastAk = null, lqQuiet = false;
+  const audKey = () => [tab, PR ? PR.id + ':' + PR.qi : '', T ? T.id + ':' + qi : '', tab === 'study' ? mode + ':' + (queue[0] || '') + ':' + flipped + ':' + listView : '',
+    LQ && tab === 'flash' ? LQ.i + ':' + LQ.flip : ''].join('|');
   function render() {
-    stopAudio();
+    if (lqQuiet && (tab === 'listen' || tab === 'flash')) return;   // 第 38 步：随身听、快刷后台核对时只换数据（见 lqCheck）
+    const ak = audKey(); if (ak !== lastAk) { lastAk = ak; if (tab !== 'listen') stopAudio(); }
     let body = '';
     if (PR) body = pracHTML();
     else if (tab === 'study') body = studyHTML();
@@ -162,11 +168,13 @@ const Stu = (() => {
     else if (tab === 'drill') body = drillHTML();
     else if (tab === 'err') body = errHTML();
     else if (tab === 'words') body = wordsHTML();
+    else if (tab === 'listen' || tab === 'flash') body = lqHTML();
     else body = mapHTML();
     $('app').innerHTML = header() + '<main class="wrap">' + (stale ? '<div class="warnbox">' + esc(stale) + ' <button class="gbtn" data-act="reload">重新读取</button></div>' : '') + body + '</main>';
     if (tab === 'test' && T && instant) needRes();
     if (PR) prSeen();
     if (tab === 'words' && !PR) wlPaint();
+    acAuto();
   }
   // 练习、刷题翻到第 i 题：告诉服务器「学生看过这道题了」（周测优先出没见过的题型）。第 1 题服务器出题时已经记了；
   // 没报上（断网）的下次显示这一题时再报；不算作答、不进刷题统计
@@ -540,14 +548,28 @@ const Stu = (() => {
     jc: '这个词是什么意思？', cj: '哪个日语词是这个意思？', kr: '这个词怎么读？',
     yomi: '画线的词怎么读？', hyoki: '画线的词用汉字怎么写？', bunmyaku: '（　）里放哪个最合适？',
     iikae: '哪个和画线部分的意思最接近？', yoho: '这个词用得对的是哪一句？',
+    ac: '听读音，选出它的中文意思（点喇叭可以重播）',
   };
   const qText = it => it.s ? (it.t === 'kr' ? '画线的词在这句里怎么读？' : '画线的词在这句里是什么意思？') : (QT[it.t] || '');
   const isJ = t => ['yomi', 'hyoki', 'bunmyaku', 'iikae', 'yoho'].includes(t);
   const sentHTML = (q, cls) => '<div class="qs' + (cls || '') + '" lang="ja">' + rb(q).replace(/（　）/g, '<span class="blank">（　　）</span>') + '</div>';
-  const stemHTML = it => it.s ? sentHTML(it.s) : isJ(it.t) && it.t !== 'yoho' ? sentHTML(it.q)
+  // 第 38 步：听音选意思——题面不写这个词，只有一个大喇叭（出题时自动播一次，点了重播）和「慢速再听」；答完才显示写法、读音、意思
+  const acStem = it => '<div class="acq"><button type="button" class="say acbig" data-audio="' + esc(aud(it.id)) + '" aria-label="听读音（点一下重播）">' + SPK + '</button>' +
+    '<button type="button" class="gbtn" data-audio="' + esc(aud(it.id)) + '" data-spd="' + SLOW + '">慢速再听</button></div>';
+  const acCard = (it, rs) => it && it.t === 'ac' && rs && rs.card && rs.card.w ? '<div class="acw"><div class="head"><span class="w" lang="ja">' + esc(rs.card.w) + '</span>' + (rs.card.r && rs.card.r !== rs.card.w ? '<span class="r" lang="ja">' + esc(rs.card.r) + '</span>' : '') +
+    sayBtn(aud(it.id), '再听一遍') + slowBtn(aud(it.id), '慢速再听一遍') + '</div><div class="acm">' + esc(rs.card.m) + '</div></div>' : '';
+  const stemHTML = it => it.t === 'ac' ? acStem(it) : it.s ? sentHTML(it.s) : isJ(it.t) && it.t !== 'yoho' ? sentHTML(it.q)
     : '<div class="q' + (it.t === 'cj' ? ' zhq' : '') + '" lang="' + (it.t === 'cj' ? 'zh' : 'ja') + '">' + esc(it.q) + '</div>';
   const optHTML = (it, o) => isJ(it.t) ? rb(o) : esc(o);
-  const jpOpt = t => t !== 'jc';
+  const jpOpt = t => t !== 'jc' && t !== 'ac';
+  // 听音题第一次显示（还没答）时自动播一次读音；同一题重画不再播（手机浏览器不让自动播时会提示点喇叭）。听音题只在练习、刷题里有（正式测验不出）
+  let lastAuto = '';
+  function acAuto() {
+    let it = null, key = '';
+    if (PR && tab === PR.back && !PR.ended && PR.qi < PR.items.length) { it = PR.items[PR.qi]; if (it && it.t === 'ac' && !PR.res[PR.qi] && !(PR.skip && PR.skip.has(PR.qi))) key = 'p' + PR.id + ':' + PR.qi; }
+    if (!key || key === lastAuto) return;
+    lastAuto = key; play(aud(it.id));
+  }
   // rs：当场判过的结果（选的标红/绿、正确的标绿）；lock：这题的选项不能再点
   // 题目上方的「N3 ★★★★」（第 36 步：测验、练习、刷题都有；老师关了「显示档和难度星级」就不显示——服务器那时根本不给档和星；旧数据库没给就不显示）
   const starOn = () => !(D && D.drill && D.drill.star === false);
@@ -751,8 +773,8 @@ const Stu = (() => {
   async function pStart(a, title, back) {
     if (prStarting) return;
     const key = JSON.stringify(a), req = prPend && prPend.key === key ? prPend.req : uid(), my = ++prSeq;
-    prPend = { key, req }; prStarting = true;
-    let r; try { r = await rpc('stu_practice', { act: 'start', a: Object.assign({ req }, a) }, { obj: true }); }
+    prPend = { key, req }; prStarting = true; unlockAudio();
+    let r; try { r = await rpc('stu_practice', { act: 'start', a: Object.assign({ req, cv: CV }, a) }, { obj: true }); }   // 第 38 步：带上网页版本（20 以上才出听音题）
     catch (e) { if (my !== prSeq) return; prStarting = false; if (e.status >= 400 && e.status < 500) prPend = null; fail(e); return; }   // 服务器明确拒绝才换新编号；网络断了、服务器出错（不知道建没建）下次沿用同一个编号
     if (my !== prSeq) return;                        // 等的时候已经切到别的页签或退出了：不再拉回练习
     prStarting = false; prPend = null; syncStar(r);
@@ -773,24 +795,27 @@ const Stu = (() => {
         (PR.more ? '<button class="btn' + (done > right ? '' : ' main') + '" data-act="pmore">' + (PR.rid ? '接着做下一组（还有 ' + PR.more + ' 题）' : '接着练下一组（还有 ' + PR.more + ' 个）') + '</button>' : '') +
         '<button class="btn' + (done > right || PR.more ? '' : ' main') + '" data-act="pexit">返回</button></div></div>';
     }
-    const it = PR.items[PR.qi], rs = PR.res[PR.qi];
-    const vd = rs ? '<div class="vd ' + (rs.ok ? 'ok' : 'bad') + '" role="status">' + (rs.ok ? '答对了' : '答错了，正确答案是第 ' + (rs.a + 1) + ' 个') + '</div>' + (rs.why ? '<div class="why">' + esc(rs.why) + '</div>' : '')
+    const it = PR.items[PR.qi], rs = PR.res[PR.qi], sk = skipped();
+    const vd = rs ? '<div class="vd ' + (rs.ok ? 'ok' : 'bad') + '" role="status">' + (rs.ok ? '答对了' : '答错了，正确答案是第 ' + (rs.a + 1) + ' 个') + '</div>' + (rs.why ? '<div class="why">' + esc(rs.why) + '</div>' : '') + acCard(it, rs)
+      : sk ? '<div class="vd warn" role="status">老师暂时关掉了「听音选意思」，这题不判了，点「下一题」跳过</div>'
       : PR.busy ? '<div class="vd muted" role="status">正在判……</div>' : '<div class="small muted">选了马上告诉你对不对</div>';
     return '<div class="wkline"><span class="muted">' + esc(PR.title) + (PR.more || PR.part ? '（第 ' + (PR.part + 1) + ' 组）' : '') + ' · 第 ' + (PR.qi + 1) + ' / ' + n + ' 题 · 不算成绩</span><button type="button" class="gbtn" data-act="pexit">结束练习</button></div>' +
       (PR.more && PR.qi === 0 ? '<div class="small muted">' + (PR.rid ? '这张卷题比较多：这一组 ' + n + ' 题，还有 ' + PR.more + ' 题，做完可以接着做下一组。' : '错的词比较多：本次 ' + n + ' 个，还有 ' + PR.more + ' 个，练完可以接着练下一组。') + '</div>' : '') +
-      '<div class="card">' + qBody(it, PR.sel, rs, !!rs || PR.busy) + vd + '</div>' +
+      '<div class="card">' + qBody(it, PR.sel, rs, !!rs || PR.busy || sk) + vd + '</div>' +
       '<div class="bar two"><button class="btn" data-act="pprev"' + (PR.qi === 0 ? ' disabled' : '') + '>上一题</button>' +
-      '<button class="btn' + (rs ? ' main' : '') + '" data-act="pnext"' + (rs ? '' : ' disabled') + '>' + (PR.qi === n - 1 ? '看结果' : '下一题') + '</button></div>';
+      '<button class="btn' + (rs || sk ? ' main' : '') + '" data-act="pnext"' + (rs || sk ? '' : ' disabled') + '>' + (PR.qi === n - 1 ? '看结果' : '下一题') + '</button></div>';
   }
+  const skipped = () => !!(PR && PR.skip && PR.skip.has(PR.qi));   // 第 38 步：老师关了听音选意思、不再判的那道听音题
   async function pAnswer(j) {
-    if (!PR || PR.busy || PR.res[PR.qi]) return;
+    if (!PR || PR.busy || PR.res[PR.qi] || skipped()) return;
     const my = PR, i = PR.qi;
     PR.busy = true; PR.sel = j; render();
     let r = null, err = null;
     try { r = await rpc('stu_practice', { act: 'answer', a: { pid: my.id, i, choice: j } }, { obj: true }); } catch (e) { err = e; }
     if (PR !== my) return;                         // 等的时候已经退出或换了一次练习
     PR.busy = false;
-    if (!err && r && (r.state === 'exam' || r.state === 'off')) { PR.sel = null; toast(r.msg || '先交卷，再继续练习'); }
+    if (!err && r && r.state === 'off' && r.ac) { PR.sel = null; (PR.skip = PR.skip || new Set()).add(i); toast(r.msg || '老师暂时关掉了「听音选意思」，这道题跳过'); }   // 第 38 步：只是这道听音题不判了，可以跳过
+    else if (!err && r && (r.state === 'exam' || r.state === 'off')) { PR.sel = null; toast(r.msg || '先交卷，再继续练习'); }
     else if (!err && r && r.i === i && Number.isInteger(r.a)) { PR.res[i] = r; PR.sel = r.mine; }
     else { PR.sel = null; toast('没判上：' + (err ? err.message : '回复不对') + '，再点一次'); }   // 服务器已经记下的话，再点会回第一次的结果
     if (tab === PR.back) render();
@@ -824,7 +849,8 @@ const Stu = (() => {
       const scopeWant = old.scopeWant && !okSc(old.scopeWant) ? old.scopeWant : null;
       const scope0 = old.scopeWant ? (okSc(old.scopeWant) ? old.scopeWant : null) : okSc(old.scope) ? old.scope : (['learned', 'week', 'err', 'dwrong', 'all'].find(okSc) || null);
       DS = { opts: r, err: null, scope: scope0, scopeWant, lvBad, lvGone: scopeWant ? old.lvGone || null : null,
-             lv: new Set(lvKeep), t: new Set([...(old.t || [])].filter(t => JN.some(([k]) => k === t))),
+             lv: new Set(lvKeep), t: new Set([...(old.t || [])].filter(t => JN.some(([k]) => k === t) || (t === 'ac' && (acAvail(r) || r.state !== 'ok')))),
+             acGone: r.state === 'ok' && !acAvail(r) && ((old.t && old.t.has('ac')) || !!old.acGone),   // 第 38 步：选过听音选意思、老师刚关掉了（学生自己再点题型以前一直提示）
              st: new Set(r.star === false ? [] : (old.st || [])),   // 老师关了「显示档和难度星级」：之前选的星级条件清掉（页面上也不显示这个筛选）
              n: old.n || null, custom: old.custom || '', cnt: null,
              order: old.order && r.orders && r.orders[old.order] ? old.order : (r.order || 'fresh') };   // 出题方式：上次选的还开着就接着用，不然用老师设的默认
@@ -853,6 +879,8 @@ const Stu = (() => {
     if (tab === 'drill' && !PR) render();
   }
   const dWant = () => { if (!DS) return null; if (DS.custom !== '') { const v = Number(DS.custom); return Number.isInteger(v) && v >= 1 && v <= num(DS.opts && DS.opts.max, 100) ? v : null; } return DS.n; };
+  // 第 38 步：服务器说这个学生能选「听音选意思」（老师开着、数据库跑过第 38 步）
+  const acAvail = o => !!(o && Array.isArray(o.types) && o.types.includes('ac'));
   const dArgs = () => Object.assign({ scope: DS.scope, lv: [...DS.lv], t: [...DS.t], order: DS.order || 'fresh' }, DS.opts && DS.opts.star === false ? {} : { st: [...DS.st].sort() });
   // 数「符合条件有几题」：选项一变就等 250 毫秒再数（后发的才算数）
   function dCount() {
@@ -860,7 +888,7 @@ const Stu = (() => {
     if (!DS || !DS.scope) return;
     const my = ++dcSeq; DS.cnt = null; dPaint();
     dcTimer = setTimeout(async () => {
-      let r = null; try { r = await rpc('stu_drill', { act: 'count', a: dArgs() }, { obj: true }); } catch (e) { r = { err: e.message }; }
+      let r = null; try { r = await rpc('stu_drill', { act: 'count', a: Object.assign({ cv: CV }, dArgs()) }, { obj: true }); } catch (e) { r = { err: e.message }; }   // 第 38 步：带上网页版本
       if (my !== dcSeq || !DS) return;
       DS.cnt = r; dPaint();
     }, 250);
@@ -890,6 +918,8 @@ const Stu = (() => {
     else t = '符合条件：<b>' + num(cnt.n) + '</b> 题（' + num(cnt.words) + ' 个词，同一个词这次最多 ' + num(cnt.per, 1) + ' 题）' + (want && num(cnt.n) < want && num(cnt.n) > 0 ? '。只有 ' + num(cnt.n) + ' 题，就做这 ' + num(cnt.n) + ' 题' : '')
       + (num(cnt.n) === 0 && cnt.order === 'done' ? '。「只出做过的题」只从你答过的题里出，这个范围里你还没答过题' + (DS.opts && DS.opts.orders && (DS.opts.orders.fresh || DS.opts.orders.rand) ? '，可以换个范围或者换出题方式' : '，可以换个范围') : '');
     if (DS.custom !== '' && !want) t += '<br><span class="bad">自己填的题数要在 1～' + mx + ' 之间</span>';
+    if (DS.t.has('ac') && DS.st.size) t += '<br><span class="small">「听音选意思」没有难度星级：选了难度，就只出 JLPT 题型</span>';   // 第 38 步
+    if (DS.acGone) t += '<br><span class="small">老师暂时关掉了「听音选意思」，题型里已经去掉了</span>';
     c.innerHTML = t;
     const zero = cnt && !cnt.err && cnt.state === 'ok' && num(cnt.n) === 0;
     b.disabled = prStarting || !DS.scope || !want || zero;
@@ -911,7 +941,8 @@ const Stu = (() => {
     else if (ords.length === 1) h += '<div class="small muted dord1">出题方式：<b>' + ords[0][1] + '</b>（老师设的：' + ords[0][2] + '）</div>';
     h += '<h2>再筛 <small>可以不选＝都要</small></h2>' +
       '<div class="dfl"><span class="lab">档</span><div class="checks">' + (o.lv || []).map(l => '<button type="button" class="ck" data-dlv="' + l + '" aria-pressed="' + DS.lv.has(l) + '">' + l + '</button>').join('') + '</div></div>' +
-      '<div class="dfl"><span class="lab">题型</span><div class="checks">' + JN.map(([k, nm]) => '<button type="button" class="ck" data-dt="' + k + '" aria-pressed="' + DS.t.has(k) + '" lang="ja">' + nm + '</button>').join('') + '</div></div>' +
+      '<div class="dfl"><span class="lab">题型' + (acAvail(o) ? ' <small>不选＝5 种 JLPT 题型都要；「听音选意思」要听读音，想刷就点上它</small>' : '') + '</span><div class="checks">' + JN.map(([k, nm]) => '<button type="button" class="ck" data-dt="' + k + '" aria-pressed="' + DS.t.has(k) + '" lang="ja">' + nm + '</button>').join('') +
+        (acAvail(o) ? '<button type="button" class="ck dac" data-dt="ac" aria-pressed="' + DS.t.has('ac') + '">听音选意思</button>' : '') + '</div></div>' +   // 第 38 步
       (o.star !== false ? '<div class="dfl"><span class="lab">难度 <small>同一档里比，1 星最容易</small></span><div class="checks">' + [1, 2, 3, 4, 5].map(s => '<button type="button" class="ck dst" data-dst="' + s + '" aria-pressed="' + DS.st.has(s) + '" aria-label="' + s + ' 星">' + '★'.repeat(s) + '</button>').join('') + '</div></div>' : '');
     h += '<h2>这次做多少 <small>最多 ' + mx + ' 题，题目随机</small></h2><div class="dnum">' + NSET.filter(x => x <= mx).map(x => '<button type="button" class="ck" data-dn="' + x + '" aria-pressed="' + (DS.custom === '' && DS.n === x) + '">' + x + ' 题</button>').join('') +
       '<label class="dcus">自己填<input id="dcustom" type="number" inputmode="numeric" min="1" max="' + mx + '" value="' + esc(DS.custom) + '" placeholder="1～' + mx + '" aria-label="自己填这次做多少题"></label></div>' +
@@ -924,8 +955,8 @@ const Stu = (() => {
   async function dStart(a, title) {
     if (prStarting) return;
     const key = 'drill|' + JSON.stringify(a), req = prPend && prPend.key === key ? prPend.req : uid(), my = ++prSeq;
-    prPend = { key, req }; prStarting = true; dPaint();
-    let r; try { r = await rpc('stu_drill', { act: 'start', a: Object.assign({ req }, a) }, { obj: true }); }
+    prPend = { key, req }; prStarting = true; dPaint(); unlockAudio();
+    let r; try { r = await rpc('stu_drill', { act: 'start', a: Object.assign({ req, cv: CV }, a) }, { obj: true }); }   // 第 38 步：带上网页版本（20 以上才出听音题）
     catch (e) { if (my !== prSeq) return; prStarting = false; if (e.status >= 400 && e.status < 500) prPend = null; fail(e); dPaint(); return; }
     if (my !== prSeq) return;
     prStarting = false; prPend = null; syncStar(r);
@@ -940,8 +971,8 @@ const Stu = (() => {
     if (PR.qi >= n || PR.ended) {
       const right = PR.res.filter(x => x && x.ok).length, by = {};
       PR.items.forEach((it, i) => { const r = PR.res[i]; if (!r) return; const b = by[it.t] || (by[it.t] = [0, 0]); b[0]++; if (r.ok) b[1]++; });
-      const rows = JN.filter(([k]) => by[k]).map(([k, nm]) => '<tr><td lang="ja">' + nm + '</td><td>' + by[k][1] + ' / ' + by[k][0] + '</td><td>' + Math.round(by[k][1] * 100 / by[k][0]) + '%</td></tr>').join('');
-      const other = Object.keys(by).filter(k => !JN.some(([j]) => j === k));
+      const rows = TN.filter(([k]) => by[k]).map(([k, nm]) => '<tr><td' + (isJ(k) ? ' lang="ja"' : '') + '>' + nm + '</td><td>' + by[k][1] + ' / ' + by[k][0] + '</td><td>' + Math.round(by[k][1] * 100 / by[k][0]) + '%</td></tr>').join('');   // 第 38 步：听音选意思也按名字写
+      const other = Object.keys(by).filter(k => !TN.some(([j]) => j === k));
       return '<div class="card"><h2>' + (PR.ended && done < n ? '这次刷到这里' : '刷完了') + '</h2><div class="stats"><div class="stat"><b>' + done + '</b><span>这次做了' + (done < n ? '（共 ' + n + ' 题）' : '') + '</span></div><div class="stat"><b>' + right + '</b><span>答对</span></div><div class="stat"><b>' + (done ? Math.round(right * 100 / done) : 0) + '%</b><span>正确率</span></div></div>' +
         (rows || other.length ? '<div class="scroll"><table class="t"><tr><th>题型</th><th>答对</th><th>正确率</th></tr>' + rows + other.map(k => '<tr><td>其他</td><td>' + by[k][1] + ' / ' + by[k][0] + '</td><td>' + Math.round(by[k][1] * 100 / by[k][0]) + '%</td></tr>').join('') + '</table></div>' : '') +
         '<div class="muted">刷题不算成绩、不进错词本、不算打卡' + (done < n ? '；没做的题不算' : '') + '。</div><div class="form">' +
@@ -950,22 +981,23 @@ const Stu = (() => {
         (PR.args ? '<button class="btn" data-act="dmore">同样的条件再刷一组</button>' : '') +
         '<button class="btn" data-act="pexit">返回刷题设置</button></div></div>';
     }
-    const it = PR.items[PR.qi], rs = PR.res[PR.qi];
-    const vd = rs ? '<div class="vd ' + (rs.ok ? 'ok' : 'bad') + '" role="status">' + (rs.ok ? '答对了' : '答错了，正确答案是第 ' + (rs.a + 1) + ' 个') + '</div>' + (rs.why ? '<div class="why">' + esc(rs.why) + '</div>' : '')
+    const it = PR.items[PR.qi], rs = PR.res[PR.qi], sk = skipped();
+    const vd = rs ? '<div class="vd ' + (rs.ok ? 'ok' : 'bad') + '" role="status">' + (rs.ok ? '答对了' : '答错了，正确答案是第 ' + (rs.a + 1) + ' 个') + '</div>' + (rs.why ? '<div class="why">' + esc(rs.why) + '</div>' : '') + acCard(it, rs)
+      : sk ? '<div class="vd warn" role="status">老师暂时关掉了「听音选意思」，这题不判了，点「下一题」跳过</div>'
       : PR.busy ? '<div class="vd muted" role="status">正在判……</div>' : '<div class="small muted">选了马上告诉你对不对</div>';
     return '<div class="wkline"><span class="muted">' + esc(PR.title) + ' · 第 ' + (PR.qi + 1) + ' / ' + n + ' 题 · 已做 ' + done + ' · 不算成绩</span><button type="button" class="gbtn" data-act="dend"' + (PR.busy ? ' disabled' : '') + '>结束</button></div>' +
       (PR.qi === 0 && PR.avail < PR.asked ? '<div class="note">' + (PR.again ? '上一组' + (PR.all ? '一共 ' : '做错 ') + PR.asked + ' 题，老师改了设置以后现在还能刷 ' + PR.avail + ' 题' : '符合条件的只有 ' + PR.avail + ' 题') + '，这次就做这 ' + n + ' 题。</div>'
         : PR.qi === 0 && n < Math.min(PR.avail, PR.asked) ? '<div class="note">老师设的每次最多 ' + n + ' 题，这次先做这 ' + n + ' 题。</div>' : '') +
-      '<div class="card">' + qBody(it, PR.sel, rs, !!rs || PR.busy) + vd + '</div>' +
+      '<div class="card">' + qBody(it, PR.sel, rs, !!rs || PR.busy || sk) + vd + '</div>' +
       '<div class="bar two"><button class="btn" data-act="pprev"' + (PR.qi === 0 ? ' disabled' : '') + '>上一题</button>' +
-      '<button class="btn' + (rs ? ' main' : '') + '" data-act="pnext"' + (rs ? '' : ' disabled') + '>' + (PR.qi === n - 1 ? '看结果' : '下一题') + '</button></div>';
+      '<button class="btn' + (rs || sk ? ' main' : '') + '" data-act="pnext"' + (rs || sk ? '' : ' disabled') + '>' + (PR.qi === n - 1 ? '看结果' : '下一题') + '</button></div>';
   }
 
   // ── 第 37 步：数据库跑过第 37 步才有（学生页读取会给 wl）；没有就不显示词表、题型表现、错词来源（新网页先上线时照常能用）──
   const has37 = () => !!(D && D.wl && typeof D.wl === 'object');
   const wlOn = () => has37() && D.wl.on !== false;
   // 题型的中文名（测验、刷题都用）：前 5 种是 JLPT 题型，后 3 种是简单题
-  const TN = [['yomi', '漢字読み'], ['hyoki', '表記'], ['bunmyaku', '文脈規定'], ['iikae', '言い換え'], ['yoho', '用法'], ['jc', '看日语选中文'], ['cj', '看中文选日语'], ['kr', '看汉字选读音']];
+  const TN = [['yomi', '漢字読み'], ['hyoki', '表記'], ['bunmyaku', '文脈規定'], ['iikae', '言い換え'], ['yoho', '用法'], ['jc', '看日语选中文'], ['cj', '看中文选日语'], ['kr', '看汉字选读音'], ['ac', '听音选意思']];
   const tName2 = t => (TN.find(([k]) => k === t) || [, '其他'])[1];
   const pct = (a, b) => num(b) ? Math.round(num(a) * 100 / num(b)) + '%' : '—';
   const partsName = pp => String(pp || '').split('+').filter(Boolean).map(p => KN[p] || p).join('＋') || '测验';
@@ -986,6 +1018,7 @@ const Stu = (() => {
   function wlLoad(delay) {
     wlInit(); clearTimeout(wlTimer);
     const my = ++wlSeq; WL.busy = true;
+    lqSeq++; lqLoading = false;   // 第 38 步：换了筛选、排序、重新核对：还在读的「随身听／快刷这些词」那一批作废，并且马上放开它占着的按钮（旧批次晚到的回复直接丢掉，不再动按钮）
     const go = async () => {
       if (my !== wlSeq) return;
       let r = null, err = null;
@@ -1011,7 +1044,7 @@ const Stu = (() => {
     if (delay) wlTimer = setTimeout(go, delay); else go();
     if (tab === 'words' && !PR) wlPaint();
   }
-  const wlDrop = () => { wlSeq++; clearTimeout(wlTimer); if (WL) WL.busy = false; cardBusy = false; };
+  const wlDrop = () => { wlSeq++; clearTimeout(wlTimer); if (WL) WL.busy = false; cardBusy = false; lqSeq++; lqLoading = false; };   // 第 38 步：还没读完的「随身听／快刷这些词」也作废
   // 重新核对：进词表、从别的标签页／别的应用回到这一页时，先清掉上次的整页（筛选、遮挡开关留着），等服务器这次说能看再画
   // （中间可能开了考、老师改了范围或关了词表）
   function wlRecheck() {
@@ -1087,7 +1120,9 @@ const Stu = (() => {
     const pager = tot > size ? '<div class="row wpg"><button type="button" class="gbtn" data-wpg="' + Math.max(0, off - size) + '"' + (off > 0 && !WL.busy ? '' : ' disabled') + '>上一页</button><span class="small muted">第 ' + (off + 1) + '～' + Math.min(tot, off + size) + ' 个</span><button type="button" class="gbtn" data-wpg="' + (off + size) + '"' + (off + size < tot && !WL.busy ? '' : ' disabled') + '>下一页</button></div>' : '';
     const dr = wlDrill();
     h += '<div class="row wsum"><span class="small muted" role="status">' + (WL.busy ? '正在读取…… ' : '') + '符合条件 <b>' + tot + '</b> 个（词表一共 ' + num(r.all) + ' 个）</span>' +
-      (dr ? '<button type="button" class="gbtn" data-act="wdrill"' + (dr.scope && tot ? '' : ' disabled') + '>带去刷题</button>' : '') + '</div>' +
+      (dr ? '<button type="button" class="gbtn" data-act="wdrill"' + (dr.scope && tot ? '' : ' disabled') + '>带去刷题</button>' : '') +
+      (has38() && tot ? (lsOn() ? '<button type="button" class="gbtn" data-wlq="listen"' + (lqLoading || WL.busy ? ' disabled' : '') + '>随身听</button>' : '') + (qfOn() ? '<button type="button" class="gbtn" data-wlq="flash"' + (lqLoading || WL.busy ? ' disabled' : '') + '>快刷</button>' : '') : '') + '</div>' +   // 第 38 步：筛选还在读的时候先灰着
+      (has38() && tot > LQMAX && (lsOn() || qfOn()) ? '<div class="small muted">从词表带去随身听、快刷一次最多带前 ' + LQMAX + ' 个（按现在的排序）；想听后面的，换个排序或多筛几个条件。</div>' : '') +
       (dr && dr.why ? '<div class="small muted">' + esc(dr.why) + '</div>' : '') +
       (WL.sort === 'recent' ? '<div class="small muted">「最近学过」按最近一次在学习页练、每天复习这个词的时间排；以前的记录没记时间的排在后面。</div>' : '') + pager +
       (rows.length ? '<div class="wlist">' + rows.map(wlRow).join('') + '</div>' : '<div class="muted">没有符合条件的词。' + (WL.q || WL.lv.size || WL.st.size ? '少选几个条件试试。' : '') + '</div>') + pager;
@@ -1266,6 +1301,302 @@ const Stu = (() => {
       '<div class="tk">' + rows.map(([a, b, c]) => '<div class="tkr"><span class="tka">' + esc(a) + '</span><span class="tkb">' + b + '</span>' + (c ? '<span class="tkc">' + esc(c) + '</span>' : '') + '</div>').join('') + '</div></details>';
   }
 
+  // ── 第 38 步：随身听、快刷 ──
+  // 只在网页上做：用学生页已经读到的本周词单、错词本，或者词表筛出来的词（最多 300 个）；不写学习记录、不算练过、不打卡。
+  // 数据库跑过第 38 步才有（学生页读取会给 lq：开没开、老师设的默认怎么播）；没有就不显示入口
+  const has38 = () => !!(D && D.lq && typeof D.lq === 'object');
+  const lsOn = () => has38() && !!D.lq.ls && D.lq.ls.on !== false;
+  const qfOn = () => has38() && !!D.lq.qf && D.lq.qf.on !== false;
+  const examOpen = () => (D.tests || []).some(x => x.started && !x.done);   // 这周有开了考、还没交卷的测验：和刷题、词表一样先停
+  const LQMAX = 300;   // 从词表带去随身听、快刷一次最多几个（本周的词、错词本不限）
+  // 存在这个浏览器里（名字按学生链接算的摘要，不存钥匙）：随身听、快刷自己改过的设置；快刷刷到第几个；会／不会小标。存不进浏览器的只记在页面里
+  const LQH = PMK.slice(12), K_LS = 'vocab_lsset_' + LQH, K_QF = 'vocab_qfset_' + LQH, K_POS = 'vocab_qfpos_' + LQH, K_MK = 'vocab_qfmk_' + LQH, MEM = {};
+  const jget = k => { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); if (v && typeof v === 'object' && !Array.isArray(v)) return v; } catch (e) {} return MEM[k] || null; };
+  const jput = (k, v) => { MEM[k] = v; try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+  // 设置＝老师设的默认（三层设置，学生页读取时给）＋学生在这个浏览器里自己改过的项（只存改过的；老师以后改默认，没改过的项跟着变）
+  const LSDEF = { rep: 1, gap: 1.5, ex: true, order: 'seq', slow: false, hideM: false };
+  const LSOK = { rep: v => Number.isInteger(v) && v >= 1 && v <= 5, gap: v => typeof v === 'number' && v >= 0 && v <= 10, ex: v => typeof v === 'boolean', order: v => v === 'seq' || v === 'rand', slow: v => typeof v === 'boolean', hideM: v => typeof v === 'boolean' };
+  const QFDEF = { front: 'w', order: 'seq', say: true };
+  const QFOK = { front: v => v === 'w' || v === 'm', order: v => v === 'seq' || v === 'rand', say: v => typeof v === 'boolean' };
+  const TEACH = { ls: ['rep', 'gap', 'ex', 'order'], qf: ['front', 'order'] };   // 老师能设默认的几项（其余是学生自己的：慢速、遮住中文、翻面读单词）
+  function cfgOf(def, ok, teach, key) {
+    const mine = jget(key) || {}, out = { own: [] };
+    for (const k in def) { if (ok[k](mine[k])) { out[k] = mine[k]; out.own.push(k); } else out[k] = teach && ok[k](teach[k]) ? teach[k] : def[k]; }
+    return out;
+  }
+  const lsCfg = () => cfgOf(LSDEF, LSOK, D.lq && D.lq.ls, K_LS);
+  const qfCfg = () => cfgOf(QFDEF, QFOK, D.lq && D.lq.qf, K_QF);
+  const cfgPut = (key, ok, k, v) => { if (!ok[k] || !ok[k](v)) return false; const m = jget(key) || {}; m[k] = v; jput(key, m); return true; };
+  // 打乱：按一个数打乱（同一个数打乱出来的顺序一样，快刷下次接着刷时顺序不变）
+  const rng = seed => () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const shuffled = (a, seed) => { const r = rng(seed), b = a.slice(); for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
+  // LQ：正在用的随身听或快刷 = {kind listen 随身听／flash 快刷, src week 本周的词／err 错词本／wl 词表筛的, title, from 结束后回哪一页, sig 这一组词的记号（快刷记位置用）,
+  //   base 原来的顺序, list 现在的顺序, order, seed, i 第几个词, st 这个词播到第几条, playing 正在播, tok 播放编号（换词、暂停时作废旧的等待）, timer, gen,
+  //   wait 两条之间正在停, flip 快刷翻面了没有, done 播完／刷完, showM 遮住中文时这个词点开看了}
+  let LQ = null, LQSRC = null, lqSeq = 0, lqLoading = false, qfSwipeAt = 0, qfDown = null, wake = null, qfMarkAt = 0, lqChecking = false;
+  const lqWords = src => (src === 'week' ? cards() : src === 'err' ? (D.errbook || []) : []).map(c => ({ id: c.id, w: c.w, r: c.r, m: c.m, lvl: c.lvl, ex: Array.isArray(c.ex) ? c.ex : [], off: !!c.off }));
+  const lqName = k => k === 'listen' ? '随身听' : '快刷';
+  // 现在不能用的原因（开了考还没交卷、老师关了）；能用＝空
+  const lqBlockMsg = kind => examOpen() ? '这周的测验开了考还没交卷：先交卷，再用' + lqName(kind) + '（和刷题、词表一样）'
+    : kind === 'listen' && !lsOn() ? '老师暂时没有开放随身听' : kind === 'flash' && !qfOn() ? '老师暂时没有开放快刷' : '';
+  function lqOpen(kind, src, list, title, from, sig) {
+    if (!list.length) { toast('这里没有词'); return; }
+    const bm = lqBlockMsg(kind); if (bm) { toast(bm); return; }
+    lqLeave();
+    const order = kind === 'listen' ? lsCfg().order : qfCfg().order;
+    LQ = { kind, src, title, from, sig, base: list, order, seed: (Math.random() * 2147483647) | 0, list: null, i: 0, st: 0, playing: false, tok: 0, timer: 0, gen: 0, wait: false, flip: false, done: false, showM: false, miss: 0 };
+    lqArrange();
+    if (kind === 'flash') qfResume();
+    prStop(); dropRound(); listView = false;
+    tab = kind; window.scrollTo({ top: 0 });
+    render();
+    if (kind === 'listen') lsPlay();
+    else if (LQ.resumed) toast('接着上次刷到的第 ' + (LQ.resumed + 1) + ' 个（记在这个浏览器里）');
+    lqCheck();
+  }
+  // 和服务器再核对一次（别的设备刚开了考、老师刚关了随身听或快刷）：读回来交给平时的更新处理；
+  // 同一周、同一天、能不能用也没变时，只换数据不重画（正在点的按钮、翻开的卡都不动）；变成不能用了才重画（停播、遮住词）
+  async function lqCheck() {
+    if (!LQ || lqChecking || syncing) return;
+    lqChecking = true;
+    let d = null; try { d = await load(); } catch (e) {}
+    lqChecking = false;
+    if (!d || !D) return;
+    if (!d.week || !D.week || d.week.id !== D.week.id || d.week.today !== D.week.today || d.week.waiting !== D.week.waiting) { newer(d); return; }
+    const was = LQ ? lqBlockMsg(LQ.kind) : '';
+    lqQuiet = true; try { newer(d); } finally { lqQuiet = false; }
+    if (LQ && tab === LQ.kind && lqBlockMsg(LQ.kind) !== was) render();
+  }
+  function lqArrange(keepId) {
+    LQ.list = LQ.order === 'rand' ? shuffled(LQ.base, LQ.seed) : LQ.base.slice();
+    if (keepId) { const j = LQ.list.findIndex(w => w.id === keepId); if (j >= 0) LQ.i = j; }
+  }
+  // 离开随身听、快刷（换页签、点「结束」、开别的一组）：停播、放开屏幕常亮、快刷记下刷到哪里
+  function lqLeave() {
+    if (!LQ) return;
+    if (LQ.kind === 'listen') lsHalt(); else qfSave();
+    lsMedia(false);
+    LQ = null;
+  }
+  // ── 随身听：一个词＝单词 →（播例句时）例句 1 → 例句 2，连着播「几遍」；一个词里两条之间停 0.6 秒，词与词之间停设置的秒数 ──
+  const lsSteps = w => { const c = lsCfg(), ex = c.ex ? (w.ex.length ? w.ex.map((e, j) => j + 1) : w.nex ? [1, 2] : []) : [], out = []; for (let k = 0; k < c.rep; k++) [0].concat(ex).forEach(p => out.push({ p, k })); return out; };
+  function lsPlay() {
+    if (!LQ || LQ.kind !== 'listen' || tab !== 'listen') return;
+    if (!lqCan()) return;
+    if (LQ.done) { LQ.i = 0; LQ.st = 0; LQ.done = false; }
+    stopAudio(); LQ.gen = audioGen(); LQ.playing = true; LQ.blocked = false;
+    wakeOn(); lsMedia(true); lsRun();
+  }
+  // 停下（不重画）：作废还在等的下一条、停掉声音、放开屏幕常亮
+  function lsHalt() { if (!LQ) return; LQ.playing = false; LQ.tok++; clearTimeout(LQ.timer); LQ.wait = false; stopAudio(); LQ.gen = audioGen(); wakeOff(); }
+  function lsPause() { if (!LQ || LQ.kind !== 'listen') return; lsHalt(); lsMediaState(); lsPaint(); }
+  function lsRun() {
+    if (!LQ || LQ.kind !== 'listen' || !LQ.playing) return;
+    clearTimeout(LQ.timer); LQ.wait = false;
+    if (audioGen() !== LQ.gen) { LQ.playing = false; wakeOff(); lsMediaState(); lsPaint(); return; }   // 中间点了别的喇叭：先停住，点「继续」接着播
+    const w = LQ.list[LQ.i]; if (!w) { lsEnd(); return; }
+    const steps = lsSteps(w); if (LQ.st >= steps.length) LQ.st = steps.length - 1;
+    const s = steps[LQ.st], my = ++LQ.tok, c = lsCfg();
+    if (LQ.st === 0 && s.k === 0) LQ.showM = false;
+    LQ.now = s; lsPaint(); lsMediaMeta();
+    playStep(aud(w.id, s.p || 0), { rate: c.slow ? SLOW : 1, quiet: true }).then(res => {
+      if (!LQ || LQ.tok !== my || !LQ.playing) return;
+      if (res === 'stop' || res === 'block') { LQ.playing = false; LQ.blocked = res === 'block'; wakeOff(); lsMediaState(); lsPaint(); return; }   // 被打断、手机不让自动播：先停住
+      if (res === 'err') LQ.miss++;                                    // 这条读音没有：跳过，接着播
+      const last = LQ.st + 1 >= steps.length;
+      LQ.wait = true;
+      LQ.timer = setTimeout(() => {
+        if (!LQ || LQ.tok !== my || !LQ.playing) return;
+        LQ.wait = false;
+        if (last) { LQ.st = 0; LQ.i++; if (LQ.i >= LQ.list.length) { LQ.i = LQ.list.length - 1; lsEnd(); return; } } else LQ.st++;
+        lsRun();
+      }, last ? Math.round(lsCfg().gap * 1000) : 600);
+    });
+  }
+  function lsEnd() { if (!LQ) return; lsHalt(); LQ.done = true; lsMediaState(); if (tab === 'listen') render(); }
+  // 上一个／下一个：从那个词的单词读音开始；正在播就接着播
+  function lsJump(d) {
+    if (!LQ || LQ.kind !== 'listen' || !lqCan()) return;
+    LQ.i = Math.max(0, Math.min(LQ.list.length - 1, LQ.i + d)); LQ.st = 0; LQ.done = false; LQ.showM = false;
+    if (LQ.playing) { LQ.tok++; clearTimeout(LQ.timer); stopAudio(); LQ.gen = audioGen(); lsRun(); } else { LQ.now = null; render(); }
+  }
+  // 锁屏界面、耳机按键的「播放／暂停／上一个／下一个」（手机支持的话）
+  function lsMedia(on) {
+    try {
+      if (!('mediaSession' in navigator)) return;
+      const ms = navigator.mediaSession, h = (a, f) => { try { ms.setActionHandler(a, on ? f : null); } catch (e) {} };
+      h('play', () => lsPlay()); h('pause', () => lsPause()); h('nexttrack', () => lsJump(1)); h('previoustrack', () => lsJump(-1));
+      if (!on) { ms.metadata = null; ms.playbackState = 'none'; }
+    } catch (e) {}
+  }
+  function lsMediaMeta() { try { const w = LQ && LQ.list[LQ.i]; if (w && 'mediaSession' in navigator && typeof MediaMetadata === 'function') navigator.mediaSession.metadata = new MediaMetadata({ title: w.w + (w.r && w.r !== w.w ? '（' + w.r + '）' : ''), artist: '随身听', album: LQ.title }); lsMediaState(); } catch (e) {} }
+  function lsMediaState() { try { if ('mediaSession' in navigator) navigator.mediaSession.playbackState = LQ && LQ.playing ? 'playing' : 'paused'; } catch (e) {} }
+  // 播放时尽量让屏幕不熄灭（手机支持的话；切到别的页面时浏览器会自动放开，回来再要）
+  async function wakeOn() { try { if (!wake && navigator.wakeLock && document.visibilityState === 'visible') { const w = await navigator.wakeLock.request('screen'); if (LQ && LQ.playing) { wake = w; w.addEventListener('release', () => { if (wake === w) wake = null; }); } else w.release(); } } catch (e) {} }
+  function wakeOff() { const w = wake; wake = null; try { if (w) w.release(); } catch (e) {} }
+  document.addEventListener('visibilitychange', () => {
+    if ($('app').dataset.role === 'adm' || document.visibilityState !== 'visible' || !LQ || tab !== LQ.kind) return;
+    lqCheck();                                                         // 回到随身听、快刷：和服务器再核对一次
+    if (LQ.kind !== 'listen' || !LQ.playing) return;
+    wakeOn();
+    if (!LQ.wait && player.paused && audioGen() === LQ.gen) lsRun();   // 回到这一页：声音被系统停了、又没收到通知的，从这一条重新播
+  });
+  const lsNowTxt = () => { const s = LQ.now; if (LQ.done) return '播完了'; if (!s) return LQ.playing ? '' : '已暂停'; const c = lsCfg(); return (LQ.playing ? '正在播：' : '停在：') + (s.p ? '例句 ' + s.p : '单词') + (c.rep > 1 ? '（第 ' + (s.k + 1) + ' / ' + c.rep + ' 遍）' : ''); };
+  function lsNowHTML() {
+    const w = LQ.list[LQ.i], c = lsCfg(), n = LQ.list.length, s = LQ.now, ex = s && s.p && w.ex[s.p - 1];
+    let h = '<div class="card lsnow" id="lsnow"><div class="row"><span class="chip">' + esc(w.lvl || '') + '</span><span class="small muted" role="status">第 ' + (LQ.i + 1) + ' / ' + n + ' 个 · ' + esc(lsNowTxt()) + '</span></div>' +
+      '<div class="lsw"><span class="big" lang="ja">' + esc(w.w) + '</span>' + (w.r && w.r !== w.w ? '<span class="r" lang="ja">' + esc(w.r) + '</span>' : '') + (w.off ? '<span class="chip">已停用</span>' : '') + '</div>' +
+      (c.hideM && !LQ.showM ? '<button type="button" class="wmask lsm" data-act="lsshowm" aria-label="点一下看中文">中文遮住了，点一下看</button>' : '<div class="mean lsm">' + esc(w.m) + '</div>');
+    if (ex) h += '<div class="lsex"><div class="jp" lang="ja">' + rb(ex[0]) + '</div>' + (c.hideM && !LQ.showM ? '' : '<div class="zh">' + esc(ex[1]) + '</div>') + '</div>';
+    if (LQ.blocked) h += '<div class="vd warn" role="status">手机不让网页自己出声：点下面「继续」就能接着播（也看看手机音量）</div>';
+    if (LQ.miss) h += '<div class="small muted">有 ' + LQ.miss + ' 条读音没找到，跳过了</div>';
+    if (LQ.done) h += '<div class="form"><div class="muted">这 ' + n + ' 个词播完了。</div><button type="button" class="btn main" data-act="lsagain">从头再播</button><button type="button" class="btn" data-act="lqback">返回</button></div>';
+    return h + '</div>';
+  }
+  const lsCtlHTML = () => '<div class="bar lsbar" id="lsctl"><button type="button" class="btn" data-act="lsprev"' + (LQ.i === 0 ? ' disabled' : '') + '>上一个</button>' +
+    '<button type="button" class="btn main" data-act="lstoggle" aria-pressed="' + LQ.playing + '">' + (LQ.playing ? '暂停' : LQ.done ? '从头再播' : '继续') + '</button>' +
+    '<button type="button" class="btn" data-act="lsnext"' + (LQ.i >= LQ.list.length - 1 ? ' disabled' : '') + '>下一个</button></div>';
+  // 只换掉上面这个词和下面的按钮（播的时候每一条都会换；设置那一块不动，不会跳）
+  function lsPaint() {
+    if (tab !== 'listen' || !LQ || LQ.kind !== 'listen' || PR) return;
+    const a = $('lsnow'), b = $('lsctl'); if (!a || !b) { render(); return; }
+    a.outerHTML = lsNowHTML(); b.outerHTML = lsCtlHTML();
+  }
+  const stepBtn = (k, d, lab) => '<button type="button" data-lsk="' + k + '" data-lsd="' + d + '" aria-label="' + lab + '">' + (d > 0 ? '+' : '−') + '</button>';
+  const segH = (k, cur, opts, attr) => '<div class="seg" role="group">' + opts.map(([v, n]) => '<button type="button" ' + attr + '="' + k + ':' + v + '" aria-pressed="' + (String(cur) === String(v)) + '">' + n + '</button>').join('') + '</div>';
+  function lsSetHTML() {
+    const c = lsCfg(), t = (D.lq && D.lq.ls) || {}, own = c.own.filter(k => TEACH.ls.includes(k));
+    return '<details class="lqset" id="lqset"' + (LQ.setOpen ? ' open' : '') + '><summary><span class="lab">播放设置</span><span class="small muted">' + c.rep + ' 遍 · 停 ' + c.gap + ' 秒 · ' + (c.ex ? '播例句' : '只播单词') + ' · ' + (c.order === 'rand' ? '打乱' : '按顺序') + (c.slow ? ' · 慢速' : '') + '</span></summary>' +
+      '<div class="lqf"><span class="lab">每个词连着播</span><div class="step">' + stepBtn('rep', -1, '少播一遍') + '<span class="v">' + c.rep + ' 遍</span>' + stepBtn('rep', 1, '多播一遍') + '</div></div>' +
+      '<div class="lqf"><span class="lab">词与词之间停</span><div class="step">' + stepBtn('gap', -1, '少停半秒') + '<span class="v">' + c.gap + ' 秒</span>' + stepBtn('gap', 1, '多停半秒') + '</div></div>' +
+      '<div class="lqf"><span class="lab">例句</span>' + segH('ex', c.ex, [[true, '播例句'], [false, '只播单词']], 'data-lsv') + '</div>' +
+      '<div class="lqf"><span class="lab">顺序</span>' + segH('order', c.order, [['seq', '按顺序'], ['rand', '打乱']], 'data-lsv') + '</div>' +
+      '<div class="lqf"><span class="lab">语速</span>' + segH('slow', c.slow, [[false, '正常'], [true, '慢（0.75 倍）']], 'data-lsv') + '</div>' +
+      '<div class="lqf"><span class="lab">中文</span>' + segH('hideM', c.hideM, [[false, '显示'], [true, '遮住']], 'data-lsv') + '</div>' +
+      '<div class="small muted">老师设的默认：每个词 ' + num(t.rep, 1) + ' 遍、停 ' + num(t.gap, 1.5) + ' 秒、' + (t.ex === false ? '只播单词' : '播例句') + '、' + (t.order === 'rand' ? '打乱' : '按顺序') + '。你改的只存在这个浏览器里。' +
+      (own.length ? ' <button type="button" class="link" data-act="lsreset">恢复老师设的默认</button>' : '') + '</div></details>';
+  }
+  function lsHTML() {
+    return '<div class="wkline"><span class="muted">随身听 · ' + esc(LQ.title) + ' · 不算学习记录</span><button type="button" class="gbtn" data-act="lqback">结束</button></div>' +
+      lsNowHTML() + lsSetHTML() +
+      '<div class="small muted">锁屏或切到别的应用后，手机可能会停播；回到这一页点「继续」接着播。播放时会尽量让屏幕不熄灭。</div>' + lsCtlHTML();
+  }
+  // ── 快刷：一词一屏；先看写法（或中文），点一下翻面看读音和中文；左右滑或按下面的按钮换词；会／不会只是这个浏览器里的小标 ──
+  const qfMarks = () => jget(K_MK) || {};
+  function qfMark(id, v) { const m = qfMarks(); delete m[id]; m[id] = v; const ks = Object.keys(m); if (ks.length > 3000) ks.slice(0, ks.length - 3000).forEach(k => delete m[k]); jput(K_MK, m); }
+  // 刷到第几个：按「这一组词」记（本周的词按这一周、错词本、词表按筛选条件）；最多记 20 组；顺序是打乱的，连打乱用的数一起记（下次顺序一样）
+  function qfSave() {
+    if (!LQ || LQ.kind !== 'flash') return;
+    const all = jget(K_POS) || {}, w = LQ.list[Math.min(LQ.i, LQ.list.length - 1)];
+    if (LQ.done) delete all[LQ.sig];   // 刷完了：不记位置，下次从头开始
+    else all[LQ.sig] = { order: LQ.order, seed: LQ.seed, id: w ? w.id : null, i: LQ.i, at: Date.now() };
+    Object.keys(all).sort((a, b) => num(all[b].at) - num(all[a].at)).slice(20).forEach(k => delete all[k]);
+    jput(K_POS, all);
+  }
+  function qfResume() {
+    const p = (jget(K_POS) || {})[LQ.sig]; if (!p || typeof p !== 'object') return;
+    if (p.order === LQ.order && Number.isInteger(p.seed)) { LQ.seed = p.seed; lqArrange(); }
+    let j = p.id ? LQ.list.findIndex(w => w.id === p.id) : -1;
+    if (j < 0 && Number.isInteger(p.i)) j = Math.min(p.i, LQ.list.length - 1);
+    if (j > 0) { LQ.i = j; LQ.resumed = j; }
+  }
+  // 现在能不能动（开了考、老师关了：翻面、换词、标记、键盘、随身听的播放都不动，停掉声音）
+  const lqCan = () => { if (!LQ || !lqBlockMsg(LQ.kind)) return !!LQ; if (LQ.kind === 'listen') lsHalt(); else stopAudio(); if (tab === LQ.kind) render(); return false; };
+  function qfMove(d) {
+    if (!LQ || LQ.kind !== 'flash' || !lqCan()) return;
+    if (LQ.done) { if (d < 0) { LQ.done = false; LQ.i = LQ.list.length - 1; } }
+    else { const j = LQ.i + d; if (j < 0) return; if (j >= LQ.list.length) LQ.done = true; else LQ.i = j; }
+    LQ.flip = false; qfSave(); render();
+  }
+  function qfFlip() {
+    if (!LQ || LQ.kind !== 'flash' || LQ.done || !lqCan()) return;
+    LQ.flip = !LQ.flip; render();
+    if (LQ.flip && qfCfg().say) play(aud(LQ.list[LQ.i].id));
+  }
+  function qfHTML() {
+    const n = LQ.list.length, mk = qfMarks(), c = qfCfg();
+    const head = '<div class="wkline"><span class="muted">快刷 · ' + esc(LQ.title) + ' · ' + (LQ.done ? '刷完了' : '第 ' + (LQ.i + 1) + ' / ' + n + ' 个') + ' · 不算学习记录</span><button type="button" class="gbtn" data-act="lqback">结束</button></div>';
+    const note = '<div class="small muted">「会」「不会」只是给自己看的小标（存在这个浏览器里），不改学习记录、不进错词本；刷到第几个也只记在这个浏览器（换手机、换浏览器不同步）。</div>';
+    if (LQ.done) {
+      const k = LQ.list.filter(w => mk[w.id] === 'k').length, b = LQ.list.filter(w => mk[w.id] === 'n').length;
+      return head + '<div class="card"><h2>这 ' + n + ' 个刷完了</h2><div class="stats"><div class="stat"><b>' + k + '</b><span>标了会</span></div><div class="stat"><b>' + b + '</b><span>标了不会</span></div><div class="stat"><b>' + (n - k - b) + '</b><span>没标</span></div></div>' +
+        '<div class="form">' + (b ? '<button type="button" class="btn main" data-act="qfbad">只刷标了「不会」的（' + b + ' 个）</button>' : '') + '<button type="button" class="btn' + (b ? '' : ' main') + '" data-act="qfagain">从头再刷</button><button type="button" class="btn" data-act="lqback">返回</button></div></div>' + note;
+    }
+    const w = LQ.list[LQ.i], m = mk[w.id];
+    const chips = '<div class="chips"><span class="chip">' + esc(w.lvl || '') + '</span>' + (m === 'k' ? '<span class="chip ok">会</span>' : m === 'n' ? '<span class="chip bad">不会</span>' : '') + (w.off ? '<span class="chip">已停用</span>' : '') + '</div>';
+    const face = !LQ.flip
+      ? (c.front === 'm' ? '<div class="qfm">' + esc(w.m) + '</div>' : '<div class="big" lang="ja">' + esc(w.w) + '</div>') + '<div class="hint">点一下翻面 · 左右滑换词</div>'
+      : '<div class="head qfh"><span class="w" lang="ja">' + esc(w.w) + '</span>' + (w.r && w.r !== w.w ? '<span class="r" lang="ja">' + esc(w.r) + '</span>' : '') + sayBtn(aud(w.id), '听单词发音') + slowBtn(aud(w.id), '慢速听单词') + '</div><div class="mean">' + esc(w.m) + '</div><div class="hint">再点一下翻回去 · 左右滑换词</div>';
+    return head + '<div class="card front qfcard' + (LQ.flip ? ' back' : '') + '" id="qfcard" tabindex="0" role="button" aria-label="' + (LQ.flip ? '翻回去' : '翻面看读音和中文') + '">' + chips + face + '</div>' +
+      '<details class="lqset" id="lqset"' + (LQ.setOpen ? ' open' : '') + '><summary><span class="lab">快刷设置</span><span class="small muted">先看' + (c.front === 'm' ? '中文' : '写法') + ' · ' + (c.order === 'rand' ? '打乱' : '按顺序') + ' · 翻面' + (c.say ? '读' : '不读') + '单词</span></summary>' +
+      '<div class="lqf"><span class="lab">先看</span>' + segH('front', c.front, [['w', '写法'], ['m', '中文']], 'data-qfv') + '</div>' +
+      '<div class="lqf"><span class="lab">顺序</span>' + segH('order', c.order, [['seq', '按顺序'], ['rand', '打乱']], 'data-qfv') + '</div>' +
+      '<div class="lqf"><span class="lab">翻面时</span>' + segH('say', c.say, [[true, '读单词'], [false, '不读']], 'data-qfv') + '</div>' +
+      '<div class="small muted">老师设的默认：先看' + (D.lq && D.lq.qf && D.lq.qf.front === 'm' ? '中文' : '写法') + '、' + (D.lq && D.lq.qf && D.lq.qf.order === 'rand' ? '打乱' : '按顺序') + '。你改的只存在这个浏览器里。' +
+      (c.own.some(k => TEACH.qf.includes(k)) ? ' <button type="button" class="link" data-act="qfreset">恢复老师设的默认</button>' : '') + '</div></details>' + note +
+      '<div class="bar qfbar"><button type="button" class="btn" data-act="qfprev"' + (LQ.i === 0 ? ' disabled' : '') + ' aria-label="上一个">‹<span class="qft"> 上一个</span></button><button type="button" class="btn no" data-qfm="n">不会</button><button type="button" class="btn ok" data-qfm="k">会</button><button type="button" class="btn" data-act="qfnext" aria-label="下一个"><span class="qft">下一个 </span>›</button></div>';
+  }
+  function lqHTML() {
+    if (!LQ || LQ.kind !== tab) return '<div class="box"><h2>' + lqName(tab) + '</h2><div class="muted">没有在用的词了。</div><div><button type="button" class="btn" data-tab="map">返回进度</button></div></div>';
+    const bm = lqBlockMsg(LQ.kind);
+    if (bm) {   // 开了考、老师关了：停播，不显示词
+      if (LQ.kind === 'listen') { lsHalt(); lsMediaState(); } else stopAudio();
+      return '<div class="box"><h2>' + lqName(LQ.kind) + '</h2><div class="warnbox">' + esc(bm) + '</div><div class="form">' + (examOpen() ? '<button type="button" class="btn main" data-tab="test">去测验</button>' : '') + '<button type="button" class="btn" data-act="lqback">返回</button></div></div>';
+    }
+    return LQ.kind === 'listen' ? lsHTML() : qfHTML();
+  }
+  // 「进度」页的入口：选用哪些词（本周的词／错词本；词表里筛的从「全部词表」进去），再点随身听或快刷
+  function lqEntry() {
+    if (!has38() || (!lsOn() && !qfOn())) return '';
+    const nw = cards().length, ne = (D.errbook || []).length;
+    if (!LQSRC || (LQSRC === 'week' && !nw) || (LQSRC === 'err' && !ne)) LQSRC = nw ? 'week' : ne ? 'err' : null;
+    const ex = examOpen(), n = LQSRC === 'week' ? nw : LQSRC === 'err' ? ne : 0, dis = ex || !n ? ' disabled' : '';
+    return '<div class="box" id="lqbox"><h2>随身听 · 快刷 <small>不算学习记录、不算打卡</small></h2>' +
+      '<div class="small muted">' + (lsOn() ? '随身听：连着播单词和例句的读音，可以边走边听。' : '') + (qfOn() ? '快刷：一词一屏，点一下翻面，左右滑换词。' : '') + '</div>' +
+      (ex ? '<div class="warnbox">这周的测验开了考还没交卷：先交卷，再用随身听、快刷</div>' : '') +   // 页面知道开了考就停；进随身听、快刷和从别的应用切回来时会再和服务器核对一次
+      '<div class="checks lqsrc" role="group" aria-label="用哪些词">' + [['week', '本周的词', nw], ['err', '错词本', ne]].map(([k, nm, c]) => '<button type="button" class="ck" data-lqsrc="' + k + '" aria-pressed="' + (LQSRC === k) + '"' + (c ? '' : ' disabled') + '>' + nm + ' <small>' + c + '</small></button>').join('') +
+      (wlOn() ? '<button type="button" class="ck" data-act="words">从全部词表里筛…</button>' : '') + '</div>' +
+      (!nw && D.week.kind === 'R' ? '<div class="small muted">回顾周没有本周词单，可以用错词本，或者在全部词表里筛。</div>' : '') +
+      '<div class="lqgo">' + (lsOn() ? '<button type="button" class="btn main" data-lq="listen"' + dis + '>随身听' + (n ? '（' + n + ' 个）' : '') + '</button>' : '') +
+      (qfOn() ? '<button type="button" class="btn" data-lq="flash"' + dis + '>快刷' + (n ? '（' + n + ' 个）' : '') + '</button>' : '') + '</div></div>';
+  }
+  // 从词表「随身听」「快刷」：按现在的筛选，从第一页起一页一页读（最多 300 个）。总数用这一次读到的第一页的（不用页面上可能还没更新的旧数）；
+  // 筛选还在读的时候按钮是灰的；读的时候换了筛选、排序、重新核对（词表又读了一次）、离开了词表页，这一批就作废，不打开
+  async function wlLq(kind, btn) {
+    if (!WL || tab !== 'words' || lqLoading || WL.busy || !WL.res || WL.res.state !== 'ok') return;
+    const bm = lqBlockMsg(kind); if (bm) { toast(bm); return; }
+    unlockAudio();
+    const args = wlArgs(), my = ++lqSeq, ws = wlSeq, rows = [], seen = new Set();
+    lqLoading = true; busy(btn, true); toast('正在读这些词……');
+    const stale = () => my !== lqSeq || ws !== wlSeq || tab !== 'words';
+    let err = null, bad = null, want = LQMAX;
+    for (let off = 0; off < want; off += 100) {
+      let r = null;
+      try { r = await rpc('stu_info', { act: 'list', a: Object.assign({}, args, { off }) }, { obj: true, timeout: 20000 }); } catch (e) { err = e; break; }
+      if (stale()) { if (my === lqSeq) lqLoading = false; return; }
+      if (!r || r.state !== 'ok' || !Array.isArray(r.rows)) { bad = r || {}; break; }
+      if (off === 0) want = Math.min(num(r.total), LQMAX);   // 这一批的总数：第一页回来时定下
+      for (const x of r.rows) if (x && x.id && !seen.has(x.id) && rows.length < want) { seen.add(x.id); rows.push(x); }
+      if (r.rows.length < num(r.size, 100)) break;
+    }
+    if (stale()) { if (my === lqSeq) lqLoading = false; return; }
+    lqLoading = false; quiet();
+    if (tab !== 'words') return;
+    if (err) { busy(btn, false); fail(err); return; }
+    if (bad) { WL.res = bad.state ? bad : null; render(); toast(bad.msg || '没读到词表'); return; }   // 开考了、老师关了词表：和词表页一样停
+    if (!rows.length) { busy(btn, false); toast('这个筛选现在没有词了'); wlLoad(); return; }
+    const list = rows.map(x => ({ id: x.id, w: x.w, r: x.r, m: x.m, lvl: x.lvl, ex: [], nex: 2, off: !!x.off }));
+    wlDrop();
+    lqOpen(kind, 'wl', list, '词表筛出来的 ' + list.length + ' 个', 'words', 'wl:' + JSON.stringify({ lv: args.lv.slice().sort(), st: args.st.slice().sort(), q: args.q, sort: args.sort }));
+  }
+  // 结束随身听、快刷：回到进来的那一页（词表要重新核对一次）
+  function lqBack() {
+    const from = LQ ? LQ.from : 'map';
+    lqLeave(); tab = from === 'words' && wlOn() ? 'words' : 'map'; window.scrollTo({ top: 0 });
+    if (tab === 'words') { wlInit(); wlRecheck(); return; }
+    render(); refreshSide('map'); tyLoad();
+  }
+
   // ── 错词本 ──
   function errHTML() {
     if (!D.errbook.length) return '<div class="box"><h2>错词本是空的</h2><div class="muted">测验答错的词会放到这里。</div></div>';
@@ -1347,7 +1678,7 @@ const Stu = (() => {
   function mapHTML() {
     const c = D.cfg, si = LV.indexOf(c.start), s = D.stats || { streak: 0, learned: 0, correct: 0, passed: 0, days: 0, last30: [] };
     const skipped = l => c.mode === 'only' ? !(c.only || []).includes(l) : c.mode === 'step' ? LV.indexOf(l) < si : false;
-    let h = wlEntry() + '<div class="box"><h2>我的进度</h2><div class="stats">' +
+    let h = wlEntry() + lqEntry() + '<div class="box"><h2>我的进度</h2><div class="stats">' +
       '<div class="stat"><b>' + num(s.streak) + ' 天</b><span>连续打卡</span></div><div class="stat"><b>' + num(s.learned) + '</b><span>学过的词（累计）</span></div><div class="stat"><b>' + num(s.correct) + '</b><span>现在全亮的词</span></div></div>';
     const on = new Set(s.last30 || []);
     let cal = ''; for (let i = 29; i >= 0; i--) { const k = addDays(D.week.today, -i), [, mm, dd] = k.split('-'); cal += '<i' + (on.has(k) ? ' class="f"' : '') + ' title="' + (+mm) + '月' + (+dd) + '日"></i>'; }
@@ -1384,6 +1715,7 @@ const Stu = (() => {
       if (T && tb.dataset.tab !== 'test' && !(await leaveQuiz())) return;
       dropRound();
       if (tab === 'words') wlDrop();                // 离开词表页：还没回来的读取作废（回来再读）
+      if (tab === 'listen' || tab === 'flash') lqLeave();   // 第 38 步：离开随身听、快刷：停播、记下快刷刷到哪里
       tab = tb.dataset.tab; listView = false; window.scrollTo({ top: 0 });
       render();
       if (tab === 'map' || tab === 'err') refreshSide(tab);
@@ -1421,6 +1753,29 @@ const Stu = (() => {
     const o = t.closest('[data-opt]'); if (o && T) { if (!o.disabled) pick(+o.dataset.opt); return; }
     const wc = t.closest('[data-wid]'); if (wc) { jumpTo(wc.dataset.wid); return; }
     const pq = t.closest('[data-preq]'); if (pq) { if (!pq.disabled) reqModal(pq.dataset.preq); return; }
+    // ── 第 38 步：随身听、快刷 ──
+    const lqs = t.closest('[data-lqsrc]'); if (lqs) { if (!lqs.disabled && tab === 'map') { LQSRC = lqs.dataset.lqsrc; render(); } return; }
+    const lqg = t.closest('[data-lq]'); if (lqg) { if (!lqg.disabled && tab === 'map' && !T && LQSRC) { unlockAudio(); const k = lqg.dataset.lq; lqOpen(k, LQSRC, lqWords(LQSRC), LQSRC === 'week' ? '本周的词' : '错词本', 'map', LQSRC === 'week' ? 'week:' + D.week.id : 'err'); } return; }
+    const wq = t.closest('[data-wlq]'); if (wq) { if (!wq.disabled && tab === 'words') wlLq(wq.dataset.wlq, wq); return; }
+    const lsk = t.closest('[data-lsk]'); if (lsk) {
+      if (!LQ || LQ.kind !== 'listen') return;
+      const c = lsCfg(), k = lsk.dataset.lsk, d = +lsk.dataset.lsd;
+      if (k === 'rep') cfgPut(K_LS, LSOK, 'rep', Math.max(1, Math.min(5, c.rep + d)));
+      else cfgPut(K_LS, LSOK, 'gap', Math.max(0, Math.min(10, Math.round((c.gap + d * 0.5) * 10) / 10)));
+      LQ.setOpen = true; render(); return;
+    }
+    const lsv = t.closest('[data-lsv],[data-qfv]'); if (lsv) {
+      if (!LQ) return;
+      const isLs = !!lsv.dataset.lsv, [k, raw] = (lsv.dataset.lsv || lsv.dataset.qfv).split(':'), v = raw === 'true' ? true : raw === 'false' ? false : raw;
+      const cur = isLs ? lsCfg() : qfCfg();
+      if (cur[k] === v) return;
+      cfgPut(isLs ? K_LS : K_QF, isLs ? LSOK : QFOK, k, v);
+      if (k === 'order') { const w = LQ.list[LQ.i]; LQ.order = v; LQ.seed = (Math.random() * 2147483647) | 0; lqArrange(w && w.id); if (!isLs) qfSave(); }   // 换顺序：现在这个词还是现在这个
+      if (k === 'hideM') LQ.showM = false;
+      LQ.setOpen = true; render(); return;
+    }
+    const qm = t.closest('[data-qfm]'); if (qm) { if (LQ && LQ.kind === 'flash' && !LQ.done && Date.now() - qfMarkAt > 500 && lqCan()) { qfMarkAt = Date.now(); qfMark(LQ.list[LQ.i].id, qm.dataset.qfm); qfMove(1); } return; }   // 防连点：0.5 秒内的第二下不算
+    if (t.closest('#qfcard')) { if (t.closest('button')) return; if (Date.now() - qfSwipeAt > 500) qfFlip(); return; }
     // 刷题页：选范围、再筛（再点一次取消）、选题数；选项一变就重新数符合条件的题
     const dsc = t.closest('[data-dsc]'); if (dsc) { if (!dsc.disabled && DS && !PR) { DS.scope = dsc.dataset.dsc; DS.scopeWant = null; render(); dCount(); } return; }   // 学生自己选了范围：不再等词表带过来的那个
     const dfl = t.closest('[data-dlv],[data-dt],[data-dst]'); if (dfl) {
@@ -1428,12 +1783,28 @@ const Stu = (() => {
       const [set, v] = dfl.dataset.dlv ? [DS.lv, dfl.dataset.dlv] : dfl.dataset.dt ? [DS.t, dfl.dataset.dt] : [DS.st, +dfl.dataset.dst];
       if (set.has(v)) set.delete(v); else set.add(v);
       if (dfl.dataset.dlv) { DS.lvBad = null; DS.lvGone = null; }   // 学生自己重新选了档
+      if (dfl.dataset.dt) DS.acGone = false;
       render(); dCount(); return;
     }
     const dn = t.closest('[data-dn]'); if (dn) { if (DS && !PR) { DS.n = +dn.dataset.dn; DS.custom = ''; render(); } return; }
     const dor = t.closest('[data-dord]'); if (dor) { if (DS && !PR && DS.order !== dor.dataset.dord) { DS.order = dor.dataset.dord; render(); dCount(); } return; }
     const a = t.closest('[data-act]'); if (!a || a.disabled) return;
     const act = a.dataset.act;
+    // 第 38 步：随身听、快刷的按钮
+    if (act === 'lstoggle') { if (LQ && LQ.kind === 'listen') { if (LQ.playing) lsPause(); else { unlockAudio(); lsPlay(); } } return; }
+    if (act === 'lsprev' || act === 'lsnext') { lsJump(act === 'lsnext' ? 1 : -1); return; }
+    if (act === 'lsagain') { if (LQ && LQ.kind === 'listen') { LQ.done = true; lsPlay(); } return; }
+    if (act === 'lsshowm') { if (LQ) { LQ.showM = true; lsPaint(); } return; }
+    if (act === 'lsreset' || act === 'qfreset') {
+      const isLs = act === 'lsreset', key = isLs ? K_LS : K_QF, m = jget(key) || {};
+      (isLs ? TEACH.ls : TEACH.qf).forEach(k => delete m[k]); jput(key, m);
+      if (LQ) { const c = isLs ? lsCfg() : qfCfg(), w = LQ.list[LQ.i]; if (c.order !== LQ.order) { LQ.order = c.order; LQ.seed = (Math.random() * 2147483647) | 0; lqArrange(w && w.id); } LQ.setOpen = true; }
+      render(); toast('已经恢复成老师设的默认'); return;
+    }
+    if (act === 'qfprev' || act === 'qfnext') { qfMove(act === 'qfnext' ? 1 : -1); return; }
+    if (act === 'qfagain') { if (LQ && LQ.kind === 'flash') { LQ.done = false; LQ.i = 0; LQ.flip = false; qfSave(); render(); window.scrollTo({ top: 0 }); } return; }
+    if (act === 'qfbad') { if (LQ && LQ.kind === 'flash') { const mk = qfMarks(), L = LQ.list.filter(w => mk[w.id] === 'n'); if (L.length) { const o = LQ; lqOpen('flash', o.src, L, '标了「不会」的 ' + L.length + ' 个', o.from, o.sig + ':n'); } } return; }
+    if (act === 'lqback') { lqBack(); return; }
     if (act === 'dlvall') { if (DS && !PR) { DS.lvBad = null; DS.lv = new Set(); render(); dCount(); } return; }   // 第 37 步：学生确认改成全部档
     if (act === 'dstart') { if (!DS || PR || T) return; if (dPre) { toast('正在按词表的筛选选好，稍等'); return; } if (DS.lvBad) { toast('先在「档」里重新选'); return; } const want = dWant(); if (!want || !DS.scope) { toast('先选好刷哪些词和题数'); return; } dStart(Object.assign(dArgs(), { n: want }), '刷题'); return; }
     if (act === 'dagain') { if (PR && PR.kind === 'drill' && !PR.busy) dStart({ pid: PR.id }, '再刷一遍做错的'); return; }
@@ -1461,7 +1832,7 @@ const Stu = (() => {
     if (act === 'pexit') { const wasDrill = !!(PR && PR.kind === 'drill'); prStop(); render(); window.scrollTo({ top: 0 }); if (wasDrill) dLoad(); return; }
     if (act === 'pmore') { if (PR && (PR.tid || PR.rid) && PR.more) pStart(PR.rid ? { rid: PR.rid, part: PR.part + 1 } : { tid: PR.tid, part: PR.part + 1 }, PR.title, PR.back); return; }
     if (act === 'pprev') { if (PR && PR.qi > 0 && !PR.busy) { PR.qi--; PR.sel = PR.res[PR.qi] ? PR.res[PR.qi].mine : null; render(); } return; }
-    if (act === 'pnext') { if (PR && PR.res[PR.qi] && !PR.busy) { PR.qi++; PR.sel = PR.qi < PR.items.length && PR.res[PR.qi] ? PR.res[PR.qi].mine : null; render(); window.scrollTo({ top: 0 }); } return; }
+    if (act === 'pnext') { if (PR && (PR.res[PR.qi] || skipped()) && !PR.busy) { PR.qi++; PR.sel = PR.qi < PR.items.length && PR.res[PR.qi] ? PR.res[PR.qi].mine : null; render(); window.scrollTo({ top: 0 }); } return; }
     if (act === 'flip') flip();
     else if (act === 'all') { mode = 'all'; listView = false; resetQueue(); render(); }
     else if (act === 'rev') { mode = 'rev'; listView = false; resetQueue(); render(); window.scrollTo({ top: 0 }); }
@@ -1495,6 +1866,15 @@ const Stu = (() => {
     if (v === WL.q) return;
     WL.q = v; WL.off = 0; wlLoad(300);
   });
+  // 第 38 步：快刷的卡片左右滑换词（横着滑 60 像素以上、比竖着多才算；滑完紧接着的「点一下」不翻面）
+  document.addEventListener('pointerdown', e => { const c = e.target && e.target.closest && e.target.closest('#qfcard'); qfDown = c && LQ && tab === 'flash' ? { x: e.clientX, y: e.clientY, i: LQ.i } : null; });
+  document.addEventListener('pointerup', e => {
+    const d = qfDown; qfDown = null; if (!d || !LQ || tab !== 'flash' || LQ.i !== d.i) return;
+    const dx = e.clientX - d.x, dy = e.clientY - d.y;
+    if (Math.abs(dx) >= 60 && Math.abs(dx) > Math.abs(dy) * 1.5) { qfSwipeAt = Date.now(); qfMove(dx < 0 ? 1 : -1); }
+  });
+  document.addEventListener('pointercancel', () => { qfDown = null; });
+  document.addEventListener('toggle', e => { if (e.target && e.target.id === 'lqset' && LQ) LQ.setOpen = e.target.open; }, true);
   // 「本周任务」点开、收起：记住（重画页面时照样）
   document.addEventListener('toggle', e => { if (e.target && e.target.id === 'task') taskOpen = e.target.open; if (e.target && e.target.id === 'wlf' && WL) WL.fopen = e.target.open; }, true);
   document.addEventListener('input', e => {
@@ -1507,6 +1887,10 @@ const Stu = (() => {
     if (!D || $('app').dataset.role === 'adm' || document.querySelector('.modal')) return;
     if (e.target && e.target.id === 'dcustom') { if (e.key === 'Enter') { const b = $('dgo'); if (b && !b.disabled) b.click(); } return; }
     if (PR) { if (PR.qi < PR.items.length && ['1', '2', '3', '4'].includes(e.key) && PR.items[PR.qi].o[+e.key - 1] !== undefined) pAnswer(+e.key - 1); return; }
+    if (LQ && tab === LQ.kind && !(e.target && e.target.closest && e.target.closest('button,input,summary'))) {   // 第 38 步
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); const d = e.key === 'ArrowRight' ? 1 : -1; if (LQ.kind === 'flash') qfMove(d); else lsJump(d); return; }
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (LQ.kind === 'flash') qfFlip(); else if (LQ.playing) lsPause(); else lsPlay(); return; }
+    }
     if (tab === 'study' && !flipped && !listView && (e.key === ' ' || e.key === 'Enter') && queue.length && !e.target.closest('button')) { e.preventDefault(); flip(); }
     else if (tab === 'study' && flipped && ['1', '2', '3'].includes(e.key)) rate({ 1: 'no', 2: 'mid', 3: 'ok' }[e.key]);
     else if (T && ['1', '2', '3', '4'].includes(e.key) && T.items[qi].o[+e.key - 1] !== undefined) pick(+e.key - 1);

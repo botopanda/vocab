@@ -3,7 +3,8 @@ const SB_URL = 'https://mycqrrkkltfmyfkbsupp.supabase.co';
 const SB_KEY = 'sb_publishable_Dhy_8XpoAWMkXwt5aOuwlQ_CfezzLjs';   // 公开用的大门钥匙，本来就放在网页里；数据靠钥匙链接＋门卫函数保护
 const KEY = new URLSearchParams(location.search).get('k') || '';
 const LV = ['N5', 'N4', 'N3', 'N2', 'N1'];
-const CV = 19;   // 网页版本：打开、开考时告诉数据库，太旧的网页会被提示刷新。新版网页是 19（第 32 步起：方案和申请）；数据库（第 28 步起）只要 18 以上就收，第 32、33 步仍收 18，旧学生页不用强制刷新
+const CV = 20;   // 网页版本：打开、开考、出练习时告诉数据库，太旧的网页会被提示刷新。第 38 步起是 20（能播「听音选意思」的题）；学生页打开（stu_load）仍然 18 以上都收，
+                 // 旧学生页不用强制刷新——只有卷子里有听音题时旧页开考才提示刷新，组后小练也只给 20 以上的页面出听音题
 
 // 调数据库门卫函数。opt.obj：必须返回一个对象；opt.str：必须返回文字（空的、格式不对都当失败，不拿旧数据凑合）
 // opt.timeout：等这么多毫秒还没收到回复就不等了（当作网络断了：服务器可能做了，也可能没做）
@@ -77,17 +78,76 @@ function busy(btn, on) { if (btn) { btn.disabled = on; } }
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
 const aud = (id, part) => 'audio/ja/' + encodeURIComponent(id) + (part ? '_' + part : '') + '.mp3';
 const sayBtn = (src, label) => '<button class="say" type="button" data-audio="' + esc(src) + '" aria-label="' + esc(label) + '">' + SPK + '</button>';
-const player = new Audio(); player.preload = 'auto'; let wantSrc = '';
-player.addEventListener('error', () => { if (wantSrc) toast(navigator.onLine === false ? '暂时没连上网络，连上后再点喇叭' : '这条读音还没有，过一会儿再试'); });
-function stopAudio() { wantSrc = ''; try { player.pause(); } catch (e) {} }
-function play(src) {
-  try {
-    wantSrc = src; player.pause(); player.src = src; player.currentTime = 0;
-    const p = player.play();
-    if (p && p.catch) p.catch(err => { const n = err && err.name; if (n === 'AbortError' || n === 'NotSupportedError' || wantSrc !== src) return; toast('点一下喇叭就能播放；也看看手机音量'); });
-  } catch (e) { toast('点一下喇叭就能播放'); }
+// 第 38 步：慢速（0.75 倍，用浏览器的播放速度）、连播几句、重播
+const SLOW = 0.75;
+const slowBtn = (src, label) => '<button class="say slow" type="button" data-audio="' + esc(src) + '" data-spd="' + SLOW + '" aria-label="' + esc(label) + '">慢</button>';
+// 整个页面只有这一个播放器：同一时间只播一个声音。换播别的、点停、被系统打断时，上一条的等待（连播、随身听）都会收到「停了」。
+// audGen：每次「从外面」播或停（点喇叭、翻卡、换页……）加一；连播、随身听每一步都核对，变了就说明被别的声音打断了，不再往下播
+const player = new Audio(); player.preload = 'auto';
+let wantSrc = '', pDone = null, pQuiet = false, pRate = 1, audGen = 0, lastPlay = null;
+const pSettle = v => { const f = pDone; pDone = null; if (f) f(v); };
+player.addEventListener('ended', () => pSettle('end'));
+player.addEventListener('error', () => { if (!wantSrc) return; if (!pQuiet) toast(navigator.onLine === false ? '暂时没连上网络，连上后再点喇叭' : '这条读音还没有，过一会儿再试'); pSettle('err'); });
+// 系统把声音停了（来电、别的应用放声音、拔耳机等）：当成被打断（自己换下一条时 play() 已经把 paused 改回 false，不会误判；正常播完 ended 是真的）
+player.addEventListener('pause', () => { if (wantSrc && player.paused && !player.ended) pSettle('stop'); });
+player.addEventListener('playing', () => { try { if (player.playbackRate !== pRate) player.playbackRate = pRate; } catch (e) {} });   // 有的浏览器换了读音会把速度改回 1
+function stopAudio() { audGen++; wantSrc = ''; pSettle('stop'); try { player.pause(); } catch (e) {} }
+// 播一条（内部用，不算「从外面」打断）：返回 Promise——播完 'end'、读音没有或出错 'err'、被打断 'stop'、浏览器不让播（要先点一下）'block'。
+// opt.rate 速度（1＝正常，0.75＝慢）；opt.quiet 出错不弹提示（连播、随身听自己处理）
+function playStep(src, opt) {
+  opt = opt || {};
+  pSettle('stop');
+  return new Promise(res => {
+    pDone = res; pQuiet = !!opt.quiet; pRate = opt.rate > 0 ? opt.rate : 1;
+    try {
+      wantSrc = src; player.pause(); player.src = src;
+      try { player.defaultPlaybackRate = pRate; player.playbackRate = pRate; } catch (e) {}
+      try { player.currentTime = 0; } catch (e) {}
+      const p = player.play();
+      if (p && p.catch) p.catch(err => {
+        const n = err && err.name;
+        if (wantSrc !== src || pDone !== res || n === 'AbortError' || n === 'NotSupportedError') return;   // 已经换成别的了；读音没有的由上面的 error 处理
+        if (!pQuiet) toast('点一下喇叭就能播放；也看看手机音量');
+        pSettle(n === 'NotAllowedError' ? 'block' : 'err');
+      });
+    } catch (e) { if (!pQuiet) toast('点一下喇叭就能播放'); pSettle('err'); }
+  });
 }
-document.addEventListener('click', e => { const b = e.target.closest('[data-audio]'); if (b) { e.stopPropagation(); play(b.dataset.audio); } });
+// 从外面播一条（点喇叭、翻卡自动读、听音题自动播）：打断正在播的（连播、随身听也停下）
+function play(src, opt) { audGen++; lastPlay = { srcs: [src], rate: (opt && opt.rate) || 1 }; return playStep(src, opt); }
+// 连着播几条（中间停 0.5 秒）：被别的声音、换页打断就不再往下播
+async function playSeq(srcs, opt) {
+  opt = opt || {};
+  const my = ++audGen;
+  lastPlay = { srcs: srcs.slice(), rate: opt.rate || 1 };
+  for (let i = 0; i < srcs.length; i++) {
+    if (i) { await new Promise(ok => setTimeout(ok, 500)); if (my !== audGen) return 'stop'; }
+    const r = await playStep(srcs[i], { rate: opt.rate, quiet: true });
+    if (my !== audGen || r === 'stop' || r === 'block') { if (r === 'block' && my === audGen) toast('点一下喇叭就能播放；也看看手机音量'); return r === 'block' ? r : 'stop'; }
+    if (r === 'err') toast('第 ' + (i + 1) + ' 句的读音还没有，跳过了');
+  }
+  return 'end';
+}
+// 重播：这张卡上次播的（单句、连播都照原来的速度）；这张卡还没播过就播单词
+const audId = s => { const m = /audio\/ja\/([^/_]+?)(?:_\d+)?\.mp3$/.exec(String(s || '')); return m ? decodeURIComponent(m[1]) : ''; };
+function replay(id) {
+  const lp = lastPlay && lastPlay.srcs.length && (!id || audId(lastPlay.srcs[0]) === id) ? lastPlay : null;
+  if (!lp) return play(aud(id));
+  return lp.srcs.length > 1 ? playSeq(lp.srcs, { rate: lp.rate }) : play(lp.srcs[0], { rate: lp.rate });
+}
+const audioGen = () => audGen;
+// 手机浏览器要用户先点一下才肯出声：在「开始刷题」「随身听」这类按钮的点击里先让播放器空播一下（之后自动播放才不会被拦）。正在播就不用
+const SILENT = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+let unlocked = false;
+function unlockAudio() { if (unlocked || wantSrc) return; unlocked = true; try { player.src = SILENT; const p = player.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-audio],[data-seq],[data-replay]'); if (!b) return;
+  e.stopPropagation();
+  const rate = Number(b.dataset.spd) > 0 ? Number(b.dataset.spd) : 1;
+  if (b.dataset.audio) play(b.dataset.audio, { rate });
+  else if (b.dataset.seq) playSeq(b.dataset.seq.split(' ').filter(Boolean), { rate });
+  else replay(b.dataset.replay);
+});
 
 // 一张卡的背面（学习、错词本、管理端都用）
 function cardBack(c, opt = {}) {
@@ -95,7 +155,13 @@ function cardBack(c, opt = {}) {
   h += '<div class="mean"><span class="pos">' + esc(c.p) + '</span>' + esc(c.m) + '</div>';
   if (c.trap) h += '<div class="trap"><div class="lab">中日同形词 · 别按中文理解</div><div>' + rb(c.trap) + '</div></div>';
   if (c.rel && c.rel.length) h += '<div class="rel"><div class="lab">有同一个汉字的词</div><div class="relw">' + c.rel.map(x => '<span class="rw' + (x.me ? ' me' : '') + '" title="' + esc(x.m) + '"><b lang="ja">' + esc(x.w) + '</b><span lang="ja">' + esc(x.r) + '</span><i>' + esc(x.m) + '</i></span>').join('') + '</div><div class="small muted">深色的是你学过的</div></div>';
-  (c.ex || []).forEach((e, j) => { h += '<div class="ex"><div class="jp" lang="ja">' + rb(e[0]) + '</div>' + sayBtn(aud(c.id, j + 1), '听例句 ' + (j + 1)) + '<div class="zh">' + esc(e[1]) + '</div></div>'; });
+  // 每个例句旁边：喇叭（点一次播一次＝重播）、「慢」（0.75 倍）；例句下面：连播两句、慢速连播、重播（这张卡上次播的，照原来的速度）
+  (c.ex || []).forEach((e, j) => { h += '<div class="ex"><div class="jp" lang="ja">' + rb(e[0]) + '</div><div class="exb">' + sayBtn(aud(c.id, j + 1), '听例句 ' + (j + 1)) + slowBtn(aud(c.id, j + 1), '慢速听例句 ' + (j + 1)) + '</div><div class="zh">' + esc(e[1]) + '</div></div>'; });
+  if ((c.ex || []).length) {
+    const ss = c.ex.map((e, j) => aud(c.id, j + 1)).join(' '), nn = c.ex.length === 2 ? '两' : c.ex.length;
+    h += '<div class="exa">' + (c.ex.length > 1 ? '<button type="button" class="gbtn" data-seq="' + esc(ss) + '">连播' + nn + '句</button><button type="button" class="gbtn" data-seq="' + esc(ss) + '" data-spd="' + SLOW + '">慢速连播</button>' : '') +
+      '<button type="button" class="gbtn" data-replay="' + esc(c.id) + '" aria-label="重播这张卡上次播的读音">重播</button></div>';
+  }
   if (c.tip) h += '<div class="tip"><div class="lab">小提示</div><div>' + rb(c.tip) + '</div></div>';
   if (!opt.noEx) h += exBlock(c.id);   // 拓展例句（点了才生成）
   return h;

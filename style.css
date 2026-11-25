@@ -384,3 +384,48 @@ details.task>summary span{font-size:13px;color:var(--muted)}
 .tka{color:var(--muted);font-size:13px}
 .tkb b{color:var(--ai);font-weight:500}
 .tkc{grid-column:2;font-size:12px;color:var(--muted)}
+
+/* 第 38 步：例句慢速、连播、重播；听音选意思；随身听；快刷（按钮都至少 44 像素高，手机单手好点） */
+.ex .exb{grid-column:2;grid-row:1 / span 2;display:flex;flex-direction:column;align-items:center;gap:6px}
+.say.slow{font-size:13px;font-weight:500;height:34px;border-radius:10px}
+.exa{display:flex;flex-wrap:wrap;gap:8px;padding-top:10px;border-top:1px solid var(--line)}
+.exa .gbtn{min-height:40px}
+.acq{display:flex;flex-direction:column;align-items:center;gap:10px;padding-block:10px 4px}
+.say.acbig{width:84px;height:84px;border-width:2px;border-color:var(--ai);background:var(--ai-soft)}
+.say.acbig svg{width:36px;height:36px}
+.acq .gbtn{min-height:40px}
+.acw{background:var(--bg);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.acw .head .w{font-size:26px}
+.acm{font-size:17px;font-weight:500}
+.drill .ck.dac{font-family:var(--sans)}
+.lqsrc{margin-top:4px}.lqsrc .ck{min-height:40px}.lqsrc .ck small{font-size:11px;opacity:.8;font-variant-numeric:tabular-nums}
+.lqgo{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:6px}
+.lqgo .btn{min-height:48px}
+.lsnow{min-height:220px;gap:10px}
+.lsw{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;min-width:0}
+.lsw .big{font-size:clamp(40px,13vw,64px);overflow-wrap:anywhere;min-width:0}
+.lsw .r{font-family:var(--jp);font-size:18px;color:var(--muted)}
+.lsm{font-size:19px;font-weight:500;line-height:1.45}
+button.lsm{min-height:44px;width:100%;font-size:14px;font-weight:400}
+.lsex{background:var(--bg);border-radius:10px;padding:8px 12px;min-width:0}.lsex .jp{line-height:2;overflow-wrap:anywhere}.lsex .jp ruby{ruby-align:start}
+details.lqset{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:0 14px}
+details.lqset>summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap;cursor:pointer;min-height:44px;padding:6px 0;list-style:none}
+details.lqset>summary::-webkit-details-marker{display:none}
+details.lqset>summary .lab{margin:0;font-size:13px;color:var(--ai)}
+details.lqset>summary::after{content:"展开";margin-left:auto;font-size:12px;color:var(--ai)}
+details.lqset[open]>summary::after{content:"收起"}
+details.lqset>.small{padding:6px 0 10px;border-top:1px solid var(--line)}
+.lqf{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--line)}
+.lqf .lab{font-size:13px;color:var(--muted);margin:0}
+.lqf .step .v{min-width:64px;text-align:center;font-variant-numeric:tabular-nums;font-size:14px}
+.lqf .step button{width:44px;height:40px}
+.lqf .seg button{min-height:36px}
+.bar.lsbar .btn,.bar.qfbar .btn{min-height:54px;padding-inline:6px}
+.bar.qfbar{grid-template-columns:repeat(4,minmax(0,1fr))}
+.qfcard{touch-action:pan-y;user-select:none;-webkit-user-select:none;min-height:300px}
+.qfcard.back{gap:12px}
+.qfcard .qfm{font-size:clamp(22px,7vw,30px);font-weight:500;line-height:1.4;padding-inline:8px;overflow-wrap:anywhere}
+.qfcard .qfh{justify-content:center}
+.qfcard .mean{text-align:center}
+.qfcard .big{overflow-wrap:anywhere;max-width:100%}
+@media (max-width:360px){.qfbar .qft{display:none}.bar.qfbar .btn{font-size:18px}}   /* 最窄的手机：「上一个／下一个」只留箭头，不换行（读屏照样读「上一个」「下一个」） */
