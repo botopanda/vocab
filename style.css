@@ -327,3 +327,60 @@ table.t th{color:var(--muted);font-weight:400;font-size:12px;border-top:0}
 .qsd span{background:var(--bg);border-radius:6px;padding:2px 0}
 .qst td:nth-child(3){min-width:180px;white-space:normal}
 .qsl select{max-width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink)}
+
+/* 第 37 步：全部词表（筛选、遮住自测、一页 100 个）、各题型正确率、测验按题型、错词来源、本周任务 */
+.wl37 .lh{margin:0}
+.wq{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);font-size:16px;margin-top:4px}
+.wl37 .ck{min-height:38px;min-width:44px;padding:5px 9px}
+.wl37 .ck small{font-size:11px;opacity:.8;font-variant-numeric:tabular-nums}
+.wl37 .seg.wsort{align-self:flex-start}
+.wmk{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:2px}
+.wmk .lab{font-size:13px;color:var(--muted);margin:0 2px 0 0}
+details.wlf{border:1px solid var(--line);border-radius:12px;padding:0 12px}
+details.wlf>summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap;cursor:pointer;min-height:44px;padding:6px 0;list-style:none}
+details.wlf>summary::-webkit-details-marker{display:none}
+details.wlf>summary .lab{margin:0;font-size:13px;color:var(--ai)}
+details.wlf>summary::after{content:"展开";margin-left:auto;font-size:12px;color:var(--ai)}
+details.wlf[open]>summary::after{content:"收起"}
+.wfr{display:grid;grid-template-columns:3.2em minmax(0,1fr);gap:8px;align-items:start;padding:6px 0;border-top:1px solid var(--line)}
+.wfr .lab{font-size:13px;color:var(--muted);margin:0;padding-top:8px;line-height:1.3}.wfr .lab small{font-size:11px;font-weight:400}
+.wfr .seg{justify-self:start}
+.wsum{margin-top:6px}.wsum b{color:var(--ink)}
+.wpg{justify-content:space-between;margin:4px 0}
+.wlist{display:flex;flex-direction:column;border-top:1px solid var(--line);margin-top:4px}
+.wrow{display:flex;flex-direction:column;gap:2px;padding:9px 0;border-bottom:1px solid var(--line);min-width:0}
+.wr1,.wr2{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+.wr2{justify-content:space-between;flex-wrap:nowrap}
+.ww{font-family:var(--jp);font-size:18px;font-weight:500;line-height:1.35;color:var(--ink);background:none;border:0;padding:2px 0;cursor:pointer;text-align:left;overflow-wrap:anywhere;min-width:0}
+.wr{font-family:var(--jp);font-size:14px;color:var(--muted);overflow-wrap:anywhere;min-width:0}
+.wm{font-size:14px;color:var(--ink);min-width:0;overflow-wrap:anywhere;flex:1 1 auto}
+.wtags{display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:auto}
+.chip.wst{background:var(--bg);color:var(--muted)}
+.wmask{border:1px dashed var(--line);background:var(--bg);color:var(--muted);border-radius:8px;padding:4px 10px;font-size:13px;cursor:pointer;min-height:34px;min-width:44px;text-align:left}
+.wmask.ww{font-size:13px;font-weight:400}
+.wmask.shown{border-style:solid;color:var(--ink);background:var(--surface)}
+.wmask.ww.shown{font-size:17px;font-weight:500}.wmask.wm{flex:1 1 auto}
+.wcard{flex:none;padding:6px 12px}
+.wcardm{margin-top:6px}
+.tyt td,.tyt th{white-space:nowrap;vertical-align:top}
+.tyt td b{font-weight:500}
+.tyfew{font-size:11px;padding:0 6px;margin-top:2px}
+.ttbox{margin-top:4px}
+.ttl{display:flex;flex-wrap:wrap;gap:4px 12px}
+.tti{white-space:nowrap}.tti b{font-weight:500;font-variant-numeric:tabular-nums}
+tr.ttrow td{border-top:0;padding-top:0;white-space:normal}
+table.hist td:last-child{white-space:normal}table.hist .link{white-space:nowrap}   /* 「以前的成绩」：结果那一格的几个按钮放不下就换行，不撑宽表格 */
+.esrc{font-size:13px;line-height:1.6;background:var(--bg);border-radius:10px;padding:6px 10px;margin:2px 0}
+.esf .checks .ck{min-height:36px}
+details.task{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:0 14px;margin-bottom:10px}
+details.task>summary{display:flex;align-items:center;gap:10px;flex-wrap:wrap;cursor:pointer;padding:10px 0;list-style:none;min-height:44px}
+details.task>summary::-webkit-details-marker{display:none}
+details.task>summary::after{content:"展开";margin-left:auto;font-size:12px;color:var(--ai)}
+details.task[open]>summary::after{content:"收起"}
+details.task>summary b{font-weight:500}
+details.task>summary span{font-size:13px;color:var(--muted)}
+.tk{display:flex;flex-direction:column;padding-bottom:10px}
+.tkr{display:grid;grid-template-columns:6.2em minmax(0,1fr);column-gap:10px;padding:6px 0;border-top:1px solid var(--line);font-size:14px}
+.tka{color:var(--muted);font-size:13px}
+.tkb b{color:var(--ai);font-weight:500}
+.tkc{grid-column:2;font-size:12px;color:var(--muted)}
