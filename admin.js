@@ -84,7 +84,7 @@ const Adm = (() => {
 
   function render() {
     typing = false;
-    const tabs = [['stu', '学生'], ['cfg', '设置'], ['ex', '拓展例句'], ['qs', '题目难度'], ['log', '改动记录']];
+    const tabs = [['stu', '学生'], ['cfg', '设置'], ['ex', '拓展例句'], ['qs', '题目难度'], ['wd', '词库'], ['log', '改动记录']];   // 第 40 步：词库
     let h = '<header class="top"><div class="wrap wide"><div class="row"><div class="brand"><b>单词系统 · 管理</b><span>' + esc(D.me) + '</span></div>' +
       '<div class="seg" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-atab="' + k + '" aria-pressed="' + (tab === k) + '">' + n + '</button>').join('') + '</div></div>' +
       (tab === 'cfg' ? scopeBar() : '') + '</div></header>';
@@ -92,8 +92,10 @@ const Adm = (() => {
     else if (tab === 'log') h += '<main class="wrap wide">' + logHTML() + '</main>';
     else if (tab === 'ex') h += '<main class="wrap wide">' + exaHTML() + '</main>';
     else if (tab === 'qs') h += '<main class="wrap wide">' + qsHTML() + '</main>';
+    else if (tab === 'wd') h += '<main class="wrap wide">' + wdHTML() + '</main>';   // 第 40 步
     else h += '<main class="wrap">' + (copied ? copyWarn() : '') + cfgHTML() + '</main>' + saveBar();
     $('app').innerHTML = h;
+    if (tab === 'wd') wdBind();
     if (tab === 'cfg') {
       buildSteps(); loadDraft();
       // 方案多、名字长时顶上一排横着滑：把选中的那个滑到看得见的地方
@@ -162,7 +164,8 @@ const Adm = (() => {
       (failOpen(s) ? '<div class="warnbox">' + esc(s.last_test.name || '最近一次测验') + '没及格（' + num(s.last_test.score) + '/' + num(s.last_test.total) + '，及格线 ' + num(s.last_test.pass, 95) + '%）<button class="gbtn" data-d="fail">调整新词量</button></div>' :
         s.last_test && s.last_test.fix ? '<div class="note">' + esc(s.last_test.name || '最近一次测验') + '没及格，已处理：' + esc(fixTxt(s.last_test.fix)) + '</div>' : '') +
       '<div class="row" style="justify-content:flex-start"><button class="gbtn" data-d="link">专属链接</button><button class="gbtn" data-d="cfg">改这个学生的设置</button><button class="gbtn" data-d="edit">改名字/备注/停用</button>' +
-      (cur && cur.kind === 'L' ? '<button class="gbtn" data-d="words">这一周的词单（换词）</button>' : '') + '</div>' +
+      (cur && cur.kind === 'L' ? '<button class="gbtn" data-d="words">这一周的词单（换词）</button>' : '') +
+      '<button class="gbtn" data-d="pweek">打印' + (cur && cur.kind === 'R' ? '本轮复习的词' : '本周词单') + '</button><button class="gbtn" data-d="perr">打印错词本</button></div>' +   // 第 40 步
       '<div class="lab">只对这个学生、马上生效</div>' +
       '<div class="form"><div class="row"><span>' + esc(extTxt) + '</span><button class="gbtn" data-d="extend"' + (cur ? '' : ' disabled') + '>延长 1 周</button></div>' +
       (cur && cur.kind === 'L' && !num(cur.nnew) && !cur.tested ? '<div class="row"><span>' + (cur.check ? '<b>请核对：</b>旧记录分不清有没有给这个学生设过「下周暂停/减量」，这一周先没自动发词。确认要学的话，补发几个：' : '这一周没有新词（还没开考）。现在补发几个：') + '</span><span class="copyrow"><input id="refv" type="number" min="1" max="500" value="' + num(cur.weekly, 100) + '" style="width:80px" aria-label="补发几个新词"><button class="gbtn" data-d="refill">补发新词</button></span></div>' : '') +
@@ -191,6 +194,17 @@ const Adm = (() => {
       if (d === 'edit') { m.close(); editModal(sid); return; }
       if (d === 'fail') { m.close(); failModal(sid, s.last_test.id); return; }
       if (d === 'words') { m.close(); wordsModal(sid); return; }
+      if (d === 'pweek' || d === 'perr') {   // 第 40 步：打印这个学生本周的词单（回顾周＝本轮复习的词）或错词本（只读：不建周、不改学习记录）
+        acting = true; busy(b, true);
+        let r = null; try { r = await rpc('adm_word', { act: 'print', a: { sid, kind: d === 'perr' ? 'err' : 'week' } }, { obj: true, timeout: 30000 }); } catch (er) { toast(wdErr(er)); }
+        acting = false; busy(b, false);
+        if (!r || !m.isConnected || seq !== detailSeq) return;
+        if (r.state !== 'ok') { toast(r.msg || '没有可以打印的词'); return; }
+        const wk = r.week || {}, nOff = num(r.off);
+        if (!(r.words || []).length) { toast(d === 'perr' ? '错词本里没有可以打印的词' + (nOff ? '（' + nOff + ' 个已停用）' : '') : '这一周没有可以打印的词'); return; }
+        printDialog({ title: d === 'perr' ? '错词本' : wk.kind === 'R' ? '第 ' + num(wk.no) + ' 周（回顾周）本轮复习的词' : '本周的词（第 ' + num(wk.no) + ' 周）', who: r.name || s.name, words: r.words, exOk: true, note: nOff ? '已停用的 ' + nOff + ' 个不印' : '' });
+        return;
+      }
       let val = null, extra = {};
       if (d === 'cut') { const raw = m.querySelector('#cutv').value.trim(); val = Number(raw); if (raw === '' || !Number.isInteger(val) || val < 0 || val > 500) { toast('请填 0～500 之间的整数'); return; } }
       if (d === 'extend') { if (!cur) return; extra = { wk: cur.id, ext: num(cur.extended) }; }
@@ -755,6 +769,318 @@ const Adm = (() => {
     await exaLoad();
   });
 
+  // ── 第 40 步：词库（搜词、看整张卡、改中文意思／小提示／中日同形提醒／例句的中文、停用启用、表格导入、待补读音和题目、最近的改动）──
+  // 读音、写法、词性、日文例句不在网页上改（改了读音音频就对不上）。每次搜、读都有自己的编号（后发的才算数）；离开这一页时作废还没回来的（不会画到别的页上）。
+  // 改词、停用启用、导入都带请求编号：回复丢了（断网、超时）再点一次用同一个编号，服务器不会改两次、记两次
+  let WD = null, wdSeq = 0, tdSeq = 0, lgSeq = 0, wmSeq = 0;
+  const WDST = [['all', '全部'], ['on', '在用'], ['off', '已停用'], ['new', '网页导入的'], ['todo', '待补读音或题目']];
+  const NO40 = '数据库还没有升级到第 40 步（要先运行 40_打印改词导入.sql），「词库」页和打印暂时用不了';
+  const no40 = e => /adm_word|Could not find the function|schema cache|PGRST202/i.test((e && e.message) || '');
+  const wdErr = e => no40(e) ? NO40 : (e && e.message) || '没读到，请再试一次';
+  const wdCall = (act, a, ms) => rpc('adm_word', { act, a: a || {} }, { obj: true, timeout: ms || 30000 });
+  const unsure = e => !!(e && (e.net || e.timeout || !e.status || e.status >= 500));   // 不知道服务器做了没有（断网、超时、服务器出错）
+  const ACTN = { edit: '改了', off: '停用了', on: '重新启用了', add: '导入新增了', imp: '导入更新了' };
+  const FLDN = { m: '中文意思', tip: '小提示', trap: '中日同形提醒', ex1: '例句1的中文', ex2: '例句2的中文' };
+  const IMPK = { new: '新增', upd: '更新', same: '和词库一样', err: '出错' };
+  function wdInit() { if (!WD) WD = { q: '', lv: '', st: 'all', off: 0, res: null, err: null, busy: false, todo: null, todoErr: null, log: null, logErr: null }; }
+  const wdChips = x => (x.active ? '' : '<span class="chip bad">已停用</span>') + (x.new ? '<span class="chip">网页导入</span>' : '') +
+    (x.au ? '' : '<span class="chip warn">没有单词读音</span>') + (num(x.nq) ? '' : '<span class="chip warn">没有 JLPT 题</span>');
+  const wdItem = (x, sub) => '<div class="it" data-wdid="' + esc(x.id) + '" role="button" tabindex="0"><div class="main"><div><span class="w" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r && x.r !== x.w ? x.r : '') + '</span> <span class="chip">' + esc(x.lvl) + '</span>' + wdChips(x) + '</div>' +
+    '<div class="sub">' + esc(x.m) + ' · 编号 ' + esc(x.id) + (sub ? ' · ' + sub : '') + '</div></div></div>';
+  function wdHTML() {
+    wdInit();
+    return '<div class="box"><h2>词库 <small>搜词、看整张卡、改中文和提示、停用</small></h2>' +
+      '<form class="wdq" id="wdf"><input id="wdqi" type="search" maxlength="30" placeholder="写法、读音、中文或编号" value="' + esc(WD.q) + '" aria-label="搜词" autocomplete="off" spellcheck="false"><button class="btn main">找</button></form>' +
+      '<div class="checks" role="group" aria-label="档">' + [['', '全部档']].concat(LV.map(l => [l, l])).map(([v, n]) => '<button type="button" class="ck" data-wdlv="' + v + '" aria-pressed="' + (WD.lv === v) + '">' + n + '</button>').join('') + '</div>' +
+      '<div class="checks" role="group" aria-label="筛选">' + WDST.map(([v, n]) => '<button type="button" class="ck" data-wdst="' + v + '" aria-pressed="' + (WD.st === v) + '">' + n + '</button>').join('') + '</div>' +
+      '<div class="small muted">点一个词看整张卡。能改：中文意思、小提示、中日同形提醒、例句的中文翻译（学生刷新页面后看到）。读音、写法、日文例句不在网页上改（改了读音音频就对不上）：要改请联系管理员。</div>' +
+      '<div id="wdres">' + wdResHTML() + '</div></div>' +
+      '<div class="box"><div class="row"><h2 class="lh">表格导入 <small>一次最多 500 行</small></h2><button type="button" class="btn" data-wa="imp">导入表格…</button></div>' +
+      '<div class="small muted">先预览：新增几个、更新几个、哪几行有错；确认后整批写入（有一行出错就一行都不写）。更新已有的词只改中文、例句中文、小提示；新增的词没有读音、没有 JLPT 题，先列在下面「待补」里。</div></div>' +
+      '<div class="box" id="wdtodo">' + wdTodoHTML() + '</div>' +
+      '<div class="box" id="wdlog">' + wdLogHTML() + '</div>';
+  }
+  function wdResHTML() {
+    const r = WD.res;
+    if (WD.err) return '<div class="warnbox">' + esc(WD.err) + (WD.err === NO40 ? '' : ' <button type="button" class="gbtn" data-wa="refind">再试一次</button>') + '</div>';
+    if (!r) return WD.busy ? '<div class="muted">正在找……</div>' : '<div class="muted">输入写法、读音、中文或编号点「找」；也可以只点上面的筛选（比如「已停用」「待补读音或题目」）。</div>';
+    const tot = num(r.total), off = num(r.off), size = num(r.size, 50), rows = Array.isArray(r.rows) ? r.rows : [];
+    const pager = tot > size ? '<div class="row wpg"><button type="button" class="gbtn" data-wdpg="' + Math.max(0, off - size) + '"' + (off > 0 && !WD.busy ? '' : ' disabled') + '>上一页</button><span class="small muted">第 ' + (off + 1) + '～' + Math.min(tot, off + size) + ' 个</span><button type="button" class="gbtn" data-wdpg="' + (off + size) + '"' + (off + size < tot && !WD.busy ? '' : ' disabled') + '>下一页</button></div>' : '';
+    return '<div class="small muted" role="status">' + (WD.busy ? '正在找…… ' : '') + '找到 ' + tot + ' 个</div>' + pager +
+      (rows.length ? '<div class="list wdl">' + rows.map(x => wdItem(x)).join('') + '</div>' : '<div class="muted">没有找到。</div>') + pager;
+  }
+  const wdPaint = () => { const el = $('wdres'); if (el && tab === 'wd') el.innerHTML = wdResHTML(); };
+  // 找词：搜索框空着、档和筛选都是「全部」时不找（8,000 个词一页页翻没用）
+  async function wdFind(off) {
+    wdInit();
+    if (off != null) WD.off = off;
+    const my = ++wdSeq, args = { q: WD.q, lv: WD.lv, st: WD.st, off: WD.off };
+    if (!args.q && !args.lv && args.st === 'all') { WD.res = null; WD.err = null; WD.busy = false; wdPaint(); return; }
+    WD.busy = true; wdPaint();
+    let r = null, err = null;
+    try { r = await wdCall('find', args); } catch (e) { err = e; }
+    if (my !== wdSeq || tab !== 'wd') return;
+    WD.busy = false;
+    if (err) { WD.err = wdErr(err); WD.res = null; } else { WD.err = null; WD.res = r; }
+    wdPaint();
+  }
+  function wdTodoHTML() {
+    const t = WD && WD.todo, rows = t && Array.isArray(t.rows) ? t.rows : [];
+    let h = '<div class="row"><h2 class="lh">待补读音、待出题 <small>网页导入的新词</small></h2>' + (rows.length ? '<button type="button" class="gbtn" data-wa="todocopy">复制这些编号</button>' : '') + '</div>';
+    if (WD && WD.todoErr) return h + '<div class="warnbox">' + esc(WD.todoErr) + '</div>';
+    if (!t) return h + '<div class="muted">正在读取……</div>';
+    h += '<div class="small muted">没有单词读音：读音按钮没声音、不出「听音选意思」；没有 JLPT 题：出题只出「看日语选中文」这类简单题。请把编号发给管理员补读音、出题，补好以后自动从这里消失。</div>';
+    h += rows.length ? '<div class="list wdl">' + rows.map(x => wdItem(x, md(x.at) + ' ' + esc(x.who) + ' 导入')).join('') + '</div>' : '<div class="muted">现在没有待补的词。</div>';
+    return h + '<div class="small muted">另外，词库原有的词里没有单词读音的 ' + num(t.noau) + ' 个、没有 JLPT 题的 ' + num(t.noq) + ' 个（以前就这样，出题时只出简单题；不在这里列）。</div>';
+  }
+  async function wdTodo() {
+    const my = ++tdSeq;
+    let r = null, err = null; try { r = await wdCall('todo'); } catch (e) { err = e; }
+    if (my !== tdSeq || tab !== 'wd') return;
+    WD.todo = err ? null : r; WD.todoErr = err ? wdErr(err) : null;
+    const el = $('wdtodo'); if (el) el.innerHTML = wdTodoHTML();
+  }
+  // 改动记录里的一条：改了哪几项（改前 → 改后）
+  function logLine(x, withWord) {
+    const b = x.before || {}, a = x.after || {};
+    let d = '';
+    if (x.act === 'add') d = '<div class="small muted">' + esc(a.lvl || '') + ' · ' + esc(a.m || '') + '</div>';
+    else if (x.act === 'edit' || x.act === 'imp') d = Object.keys(a).map(k => '<div class="small muted">' + esc(FLDN[k] || k) + '：' + esc(b[k] || '（没有）') + ' → ' + esc(a[k] || '（删掉）') + '</div>').join('');
+    return '<div><time>' + stamp(x.at) + '</time>' + esc(x.who) + ' ' + (ACTN[x.act] || x.act) + (withWord ? ' <button type="button" class="link" data-wdid="' + esc(x.id) + '" lang="ja">「' + esc(x.w || x.id) + '」</button>' : '') + d + '</div>';
+  }
+  function wdLogHTML() {
+    const L = WD && WD.log, rows = L && Array.isArray(L.rows) ? L.rows : [];
+    const h = '<h2>最近的改动 <small>谁、什么时候、改前 → 改后（最近 50 条）</small></h2>';
+    if (WD && WD.logErr) return h + '<div class="warnbox">' + esc(WD.logErr) + '</div>';
+    if (!L) return h + '<div class="muted">正在读取……</div>';
+    return h + (rows.length ? '<div class="wdlog">' + rows.map(x => logLine(x, true)).join('') + '</div>' : '<div class="muted">还没有改动。</div>');
+  }
+  async function wdLog() {
+    const my = ++lgSeq;
+    let r = null, err = null; try { r = await wdCall('log'); } catch (e) { err = e; }
+    if (my !== lgSeq || tab !== 'wd') return;
+    WD.log = err ? null : r; WD.logErr = err ? wdErr(err) : null;
+    const el = $('wdlog'); if (el) el.innerHTML = wdLogHTML();
+  }
+  function wdEnter() { wdInit(); wdTodo(); wdLog(); if (WD.q || WD.lv || WD.st !== 'all') wdFind(); }
+  function wdLeave() { wdSeq++; tdSeq++; lgSeq++; wmSeq++; if (WD) WD.busy = false; }   // 还没回来的都作废
+  function wdBind() { const f = $('wdf'); if (f) f.addEventListener('submit', e => { e.preventDefault(); WD.q = $('wdqi').value.trim().slice(0, 30); wdFind(0); }); }
+  const wdAfter = () => { if (tab !== 'wd') return; wdTodo(); wdLog(); if (WD && WD.res) wdFind(); };   // 改过、导入过以后：列表、待补、改动记录重新读
+  // 一个词：整张卡（学生看到的样子）、能改的几项、停用启用、这个词的改动记录。msg：顶上一句（保存好了／别人刚改过）；bad＝是提醒
+  async function wordModal(id, msg, bad) {
+    quiet();
+    const my = ++wmSeq;
+    let w = null; try { w = await wdCall('get', { id }); } catch (e) { if (my === wmSeq) toast(wdErr(e)); return; }
+    if (my !== wmSeq) return;
+    document.querySelectorAll('.modal.wdm').forEach(x => x.close ? x.close() : x.remove());
+    const c = w.card || {}, ed = w.ed || { m: '', tip: '', trap: '', ex: [] }, ex = Array.isArray(c.ex) ? c.ex : [], u = w.use || {}, lg = Array.isArray(w.log) ? w.log : [];
+    const m = modal('<div class="row"><h2><span lang="ja">' + esc(c.w) + '</span> <small class="muted" lang="ja">' + esc(c.r !== c.w ? c.r : '') + '</small></h2><button type="button" class="gbtn" data-close>关闭</button></div>' +
+      (msg ? '<div class="' + (bad ? 'warnbox' : 'note pok') + '" role="status">' + esc(msg) + '</div>' : '') +
+      '<div><span class="chip">' + esc(w.lvl) + '</span>' + wdChips(w) + ' <span class="small muted">编号 ' + esc(w.id) + (num(w.nq) ? ' · JLPT 题 ' + num(w.nq) + ' 道' : '') + '</span></div>' +
+      '<div class="small muted">' + num(u.learned) + ' 个学生学过 · ' + num(u.wrong) + ' 个学生的错词本里有 · ' + num(u.week) + ' 个学生这周的词单里有</div>' +
+      '<details><summary>看学生看到的卡片</summary><div class="card">' + cardBack(Object.assign({}, c, { id: w.id }), { noEx: true }) + '</div></details>' +
+      '<form class="form" id="wde"><div class="note">写法「' + esc(c.w) + '」、读音「' + esc(c.r) + '」、词性「' + esc(c.p || '') + '」、日文例句不在网页上改（改了读音音频就对不上）。<b>要改读音或例句请联系管理员。</b></div>' +
+      '<label>中文意思（必填，最多 60 个字）<input id="wd-m" maxlength="60" autocomplete="off"></label>' +
+      '<div class="small muted wdmh" id="wd-mh" hidden>改了中文意思：如果是纠正错误的意思，题库里相关题目' + (num(w.nq) ? '（' + num(w.nq) + ' 道）' : '') + '可能也要复核（题干、选项、解析是另外存的，这里改不到；请告诉管理员）。已经出好的卷子照原样判分。</div>' +   // 复查第 1 轮建议
+      '<label>小提示（可以空着；注音写成 漢字{かな}）<textarea id="wd-tip" rows="3" maxlength="200"></textarea></label>' +
+      '<label>中日同形提醒（可以空着）<textarea id="wd-trap" rows="3" maxlength="200"></textarea></label>' +
+      ex.map((e, j) => '<div class="wdex"><div class="lab">例句 ' + (j + 1) + '（日文不在网页上改）</div><div class="jp" lang="ja">' + rb(e[0]) + '</div><label>中文翻译<input id="wd-ex' + j + '" maxlength="100" autocomplete="off"></label></div>').join('') +
+      '<div class="row"><span class="small muted" id="wdst" role="status">没有改动</span><button class="btn main" id="wdsave" disabled>保存</button></div></form>' +
+      '<div class="lab">停用 · 启用</div><div class="row"><span class="small muted">' + (w.active ? '停用后不再发给学生、不出题、不进每天复习和随身听、快刷；学过的记录保留。' : '这个词现在停用着：不发给学生、不出题；错词本里标「已停用」。') + '</span>' +
+      '<button type="button" class="gbtn" id="wdtg">' + (w.active ? '停用这个词' : '重新启用') + '</button></div>' +
+      '<div class="lab">这个词的改动记录</div>' + (lg.length ? '<div class="wdlog">' + lg.map(x => logLine(x, false)).join('') + '</div>' : '<div class="small muted">还没有改动。</div>'));
+    m.classList.add('wdm');
+    const q = s => m.querySelector(s), one = v => String(v || '').replace(/\s*[\r\n]+\s*/g, ' ').trim();   // 换行改成空格（数据库不收换行）
+    q('#wd-m').value = ed.m || ''; q('#wd-tip').value = ed.tip || ''; q('#wd-trap').value = ed.trap || '';
+    ex.forEach((e, j) => { q('#wd-ex' + j).value = (ed.ex || [])[j] || ''; });
+    const vals = () => ({ m: one(q('#wd-m').value), tip: one(q('#wd-tip').value), trap: one(q('#wd-trap').value), ex: ex.map((e, j) => one(q('#wd-ex' + j).value)) });
+    const changed = v => ['m', 'tip', 'trap'].filter(k => v[k] !== (ed[k] || '')).length + v.ex.filter((z, j) => z !== ((ed.ex || [])[j] || '')).length;
+    const st = q('#wdst'), sv = q('#wdsave');
+    let rid = null, sent = '', saving = false, toggling = false, trid = null;
+    // 保存的请求还没回来时：输入框、停用按钮都锁住（复查第 1 轮：慢网时接着输入的字，会被成功回复关掉编辑框时丢掉）；没存成再放开
+    const lock = on => { m.querySelectorAll('#wde input, #wde textarea').forEach(x => { x.readOnly = on; }); q('#wdtg').disabled = on; };
+    q('#wde').addEventListener('input', () => { if (saving || toggling) return; const v = vals(), n = changed(v); st.textContent = n ? '改了 ' + n + ' 处，还没保存' : '没有改动'; sv.disabled = !n; q('#wd-mh').hidden = v.m === (ed.m || ''); });
+    q('#wde').addEventListener('submit', async ev => {
+      ev.preventDefault(); if (saving || toggling || sv.disabled) return;
+      const v = vals(); if (!changed(v)) { toast('没有改动'); return; }
+      const body = Object.assign({ id: w.id, base: ed }, v), sig = JSON.stringify(body);
+      if (!rid || sig !== sent) rid = uuid4();   // 内容没变的重试用同一个请求编号（上次存上了也不会存两次）
+      sent = sig; saving = true; busy(sv, true); lock(true); st.textContent = '正在保存……（这时先别改）';
+      let r = null, err = null;
+      try { r = await wdCall('save', Object.assign({ rid }, body)); } catch (e) { err = e; }
+      saving = false;
+      if (!m.isConnected) return;
+      if (err || r.state === 'same') lock(false);
+      if (err) {
+        busy(sv, false);
+        if (unsure(err)) st.textContent = '不知道存上没有（' + err.message + '）：再点一次「保存」（不会存两次）';
+        else { rid = null; st.textContent = '没有保存：' + err.message; fail(err); }
+        return;
+      }
+      rid = null;
+      if (r.state === 'stale') {   // 别人（或另一个窗口）刚改过：换成最新的内容，写明刚才填的，请老师再改一次（不会悄悄盖掉别人的）
+        const mine = ['m', 'tip', 'trap'].filter(k => v[k] !== (ed[k] || '')).map(k => FLDN[k] + '「' + (v[k] || '（空着）') + '」').concat(v.ex.map((z, j) => z !== ((ed.ex || [])[j] || '') ? '例句' + (j + 1) + '的中文「' + z + '」' : '').filter(Boolean));
+        m.close(); wordModal(w.id, (r.msg || '这个词刚被别人改过') + '。你刚才填的是：' + mine.join('、'), true); wdAfter(); return;
+      }
+      if (r.state === 'same') { busy(sv, false); st.textContent = '没有改动'; return; }
+      toast('已保存（学生刷新页面后看到）'); m.close(); wordModal(w.id, '已保存。学生刷新页面后看到。'); wdAfter();
+    });
+    q('#wdtg').addEventListener('click', async e => {
+      const b = e.currentTarget; if (b.disabled || toggling) return;
+      const off = w.active, act = off ? '停用' : '重新启用';
+      // 复查第 2 轮：有没保存的改动时先问（启停以后会重新读这个词，改动会丢）：先去保存，或者明确放弃
+      const n0 = changed(vals());
+      if (n0) {
+        const d = await ask('还有没保存的改动', '这个词改了 ' + n0 + ' 处还没保存。' + act + '以后会重新读一次这个词，这些改动会丢掉。', [['keep', '先去保存', true], ['drop', '放弃这些改动，接着' + act], ['no', '取消']]);
+        if (d === 'keep' && m.isConnected) { try { sv.focus(); } catch (er) {} st.textContent = '改了 ' + n0 + ' 处，还没保存：先点「保存」'; }
+        if (d !== 'drop' || !m.isConnected || toggling || saving) return;
+      }
+      const v = await ask(off ? '停用「' + esc(c.w) + '」？' : '重新启用「' + esc(c.w) + '」？',
+        off ? '停用后：不再发给学生（新的周词单、换词都不抽）、不出题、不进每天复习和随身听、快刷' + (num(u.week) ? '；这周词单里有它的 ' + num(u.week) + ' 个学生，词单里会少掉这个词' : '') + '。已经学过的记录保留，错词本里照常显示（标「已停用」）。随时可以重新启用。'
+            : '启用后照常发给学生、出题、复习。', [[off ? 'off' : 'on', off ? '停用' : '启用', true], ['no', '先不']]);
+      if (v !== (off ? 'off' : 'on') || !m.isConnected || toggling) return;
+      if (!trid) trid = uuid4();
+      toggling = true; busy(b, true); lock(true); sv.disabled = true; st.textContent = '正在' + act + '……（这时先别改）';   // 启停的请求发出去以后：输入框、保存都锁住（成功以后会重新读这个词）
+      let r = null, err = null;
+      try { r = await wdCall(off ? 'off' : 'on', { id: w.id, rid: trid }); } catch (er) { err = er; }
+      toggling = false;
+      if (err && m.isConnected) { lock(false); const n1 = changed(vals()); sv.disabled = !n1; st.textContent = n1 ? '改了 ' + n1 + ' 处，还没保存' : '没有改动'; }
+      if (err) { if (!unsure(err)) trid = null; busy(b, false); toast(unsure(err) ? '不知道' + (off ? '停用' : '启用') + '了没有（' + err.message + '）：再点一次（不会做两次）' : wdErr(err)); return; }
+      trid = null;
+      const done = off ? '已停用：不再发给学生、不出题；学过的记录保留' : '已重新启用';
+      toast(done); if (m.isConnected) { m.close(); wordModal(w.id, done + '。'); } wdAfter();
+    });
+  }
+  // ── 表格导入：粘贴或选文件 → 预览（新增、更新、出错的行和原因）→ 确认后整批写入 ──
+  // 解析表格（在网页上做）：第一行有 Tab 就按 Tab 分（从 Excel 复制粘贴就是 Tab），不然按逗号（CSV）；双引号里的逗号、换行、两个双引号都认；空行跳过。
+  // n＝这一行在表格里是第几行（老师对着表格找）。复查第 1 轮后：
+  //   · 第一行只有按列位置正好是模板的表头（编号、档、写法……小提示）才当表头跳过（不再看「有写法、读音两个字」，不会把第一条词当表头删掉）；
+  //   · 文件结束时还在双引号里（少了右引号）、右引号后面紧跟着别的字：报出是哪一行开始的，不让预览（不会把残缺的内容当成正常的交上去）；
+  //   · 复查第 2 轮：引号里换了行的格出错时，同时写这一格从第几行开始、错在第几行；只有 CR（老的 Mac 格式）的换行也算一行
+  function parseTable(text) {
+    text = String(text || '').replace(/^\uFEFF/, '');
+    const first = text.split(/\r\n|\n|\r/).find(l => l.trim() !== '') || '', sep = first.includes('\t') ? '\t' : ',';
+    const out = []; let row = [], cell = '', inq = false, line = 1, start = 1, qline = 0;
+    const end = () => { row.push(cell); cell = ''; if (row.some(x => x.trim() !== '')) out.push({ n: start, c: row }); row = []; };
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (inq) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') { cell += '"'; i++; }
+          else {
+            inq = false;
+            const nx = text[i + 1];
+            if (nx !== undefined && nx !== sep && nx !== '\r' && nx !== '\n') return { rows: [], sep, bad: (qline < line ? '从第 ' + qline + ' 行开始的那一格（引号里换了行），在第 ' + line + ' 行' : '第 ' + line + ' 行') + '：右引号后面还有别的字（' + JSON.stringify(text.slice(i + 1, i + 6)) + '…）。一格里有引号要写成两个引号（""），或者整格不用引号' };
+          }
+        }
+        else if (ch === '\r' || ch === '\n') { if (ch === '\r' && text[i + 1] === '\n') { cell += '\r\n'; i++; } else cell += ch; line++; }   // 引号里换行：CRLF、只有 LF、只有 CR 都算一行
+        else cell += ch;
+      } else if (ch === '"' && cell === '') { inq = true; qline = line; }
+      else if (ch === sep) { row.push(cell); cell = ''; }
+      else if (ch === '\r' || ch === '\n') { if (ch === '\r' && text[i + 1] === '\n') i++; end(); line++; start = line; }
+      else cell += ch;
+    }
+    if (inq) return { rows: [], sep, bad: '第 ' + qline + ' 行开始的那一格少了右引号（双引号没配对' + (line > qline ? '，一直到最后第 ' + line + ' 行都没配上' : '') + '），后面的内容都读不准' };
+    if (cell !== '' || row.length) end();
+    if (out.length && IMP_HEAD.every((h, j) => (out[0].c[j] || '').trim() === h) && out[0].c.slice(IMP_HEAD.length).every(x => x.trim() === '')) out.shift();   // 和模板的表头一模一样才跳过
+    return { rows: out, sep };
+  }
+  const IMP_HEAD = ['编号', '档', '写法', '读音', '词性', '中文', '例句1', '例句1中文', '例句2', '例句2中文', '小提示'];
+  function impResHTML(pl, top) {
+    const ct = pl.counts || {}, rows = Array.isArray(pl.rows) ? pl.rows : [], nErr = num(ct.err), nGo = num(ct.new) + num(ct.upd);
+    let h = (top ? '<div class="warnbox">' + esc(top) + '</div>' : '') +
+      '<div class="impsum">一共 <b>' + num(ct.rows) + '</b> 行：新增 <b>' + num(ct.new) + '</b> 个、更新 <b>' + num(ct.upd) + '</b> 个、和词库一样 ' + num(ct.same) + ' 个' + (nErr ? '、<b class="bad">出错 ' + nErr + ' 行</b>' : '') + (num(ct.flag) ? '；有 ' + num(ct.flag) + ' 行要看一眼（标「！」的没有改）' : '') + '</div>';
+    if (nErr) h += '<div class="warnbox">有 ' + nErr + ' 行出错，这一批一行都不会导入：在表格里改好，再点「预览」。</div>';
+    const ord = { err: 0, new: 1, upd: 2, same: 3 };
+    const all = rows.slice().sort((a, b) => (ord[a.k] - ord[b.k]) || ((b.flag ? 1 : 0) - (a.flag ? 1 : 0)) || num(a.n) - num(b.n)), list = all.filter(x => x.k !== 'same' || x.flag);   // 出错的、要看一眼的全部列出（复查第 1 轮：不只前 200 行）
+    h += '<div class="impl">' + list.map(x => '<div><b>第 ' + num(x.n) + ' 行</b> ' + (IMPK[x.k] || '') + ' <span lang="ja">' + esc(x.w || '') + (x.r && x.r !== x.w ? '（' + esc(x.r) + '）' : '') + '</span>' + (x.id ? ' <span class="muted">编号 ' + esc(x.id) + '</span>' : '') +
+      (x.k === 'new' ? ' <span class="muted">' + esc(x.lvl || '') + ' · ' + esc(x.m || '') + '</span>' : '') +
+      (Array.isArray(x.err) ? x.err.map(t => '<div class="e">✗ ' + esc(t) + '</div>').join('') : '') + (Array.isArray(x.flag) ? x.flag.map(t => '<div class="f">！' + esc(t) + '</div>').join('') : '') +
+      (x.ch && typeof x.ch === 'object' ? Object.entries(x.ch).map(([k, v]) => '<div class="small">' + esc(FLDN[k] || k) + '：' + esc((v && v[0]) || '（没有）') + ' → ' + esc(v && v[1]) + '</div>').join('') : '') + '</div>').join('') + '</div>';
+    if (all.length > list.length) h += '<div class="small muted">另外 ' + (all.length - list.length) + ' 行和词库一样，没有列出。</div>';
+    const can = !nErr && nGo > 0;
+    return h + '<div class="row"><span class="small muted">' + (can ? '新增的词编号自动编成 W 开头，排在那一档的最后；没有读音、没有 JLPT 题，先列在「待补」里。' : !nErr ? '没有要导入的：表格里的词和词库里的都一样。' : '') + '</span>' +
+      '<button type="button" class="btn main" data-ia="go"' + (can ? '' : ' disabled') + '>确认导入（新增 ' + num(ct.new) + ' 个、更新 ' + num(ct.upd) + ' 个）</button></div>';
+  }
+  function impModal() {
+    quiet();
+    document.querySelectorAll('.modal.impm').forEach(x => x.close ? x.close() : x.remove());
+    const m = modal('<div class="row"><h2>表格导入</h2><button type="button" class="gbtn" data-close>关闭</button></div>' +
+      '<div class="small muted">一行一个词，11 列（顺序固定，第一行可以是表头）：' + IMP_HEAD.join('、') + '。编号空着＝按写法＋读音找；找不到＝新增。档写 N5～N1；读音只用假名；例句里用 «» 标出这个词，注音写成 漢字{かな}。没有的内容留空格子。一次最多 500 行。</div>' +
+      '<div class="small muted">更新已有的词：只改中文、例句中文、小提示（空着的格子不改）；档、写法、读音、词性、日文例句和词库不一样的行会标出来、不改（要改请联系管理员）。</div>' +
+      '<div><button type="button" class="link" data-ia="tpl">下载空白模板（CSV，可以用 Excel 打开）</button></div>' +
+      '<div class="form"><label>粘贴表格（从 Excel 选中复制、粘贴到这里就行）<textarea id="imptx" class="impt" rows="6" spellcheck="false"></textarea></label>' +
+      '<label>或者选文件（.csv、.tsv、.txt，要 UTF-8 编码）<input type="file" id="impf" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"></label></div>' +
+      '<div class="row"><span class="small muted" id="impst" role="status"></span><button type="button" class="btn" data-ia="pv">预览</button></div>' +
+      '<div id="impres" class="impr"></div>');
+    m.classList.add('impm');
+    const ta = m.querySelector('#imptx'), out = m.querySelector('#impres'), st = m.querySelector('#impst');
+    let P = null, irid = null, going = false, viewing = false, pvSeq = 0;
+    const stale = () => { pvSeq++; if (P || irid) { P = null; irid = null; out.innerHTML = '<div class="small muted">表格改过了：请重新点「预览」。</div>'; } };
+    const fin = m.querySelector('#impf'), lock = on => { ta.readOnly = on; fin.disabled = on; };   // 预览、导入的请求还没回来时锁住表格框和选文件（不会把这时粘贴的下一批清掉）
+    ta.addEventListener('input', stale);
+    m.querySelector('#impf').addEventListener('change', async e => {
+      const f = e.target.files && e.target.files[0]; if (!f) return;
+      if (f.size > 2 * 1024 * 1024) { toast('文件太大了（最多 2MB）'); e.target.value = ''; return; }
+      let t = ''; try { const buf = await f.arrayBuffer(); t = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+      catch (er) { toast('这个文件不是 UTF-8 编码：请在 Excel 里「另存为」选「CSV UTF-8」，或者直接复制粘贴'); e.target.value = ''; return; }
+      if (!m.isConnected) return;
+      ta.value = t; stale(); st.textContent = '已读入「' + f.name + '」，点「预览」';
+    });
+    m.addEventListener('click', async e => {
+      const b = e.target.closest('[data-ia]'); if (!b || b.disabled) return;
+      const ia = b.dataset.ia;
+      if (ia === 'tpl') {
+        const csv = '\uFEFF' + IMP_HEAD.join(',') + '\r\n';   // 只有表头（复查第 1 轮：以前带一行「会う」的示例，原样导入会把示例的翻译配到词库的例句上）
+        try { const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })), a = document.createElement('a'); a.href = url; a.download = '词库导入模板.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); }
+        catch (er) { toast('这个浏览器下载不了：可以照上面写的 11 列自己做表'); }
+        return;
+      }
+      if (ia === 'pv') {
+        if (viewing || going) return;
+        const t = parseTable(ta.value);
+        if (t.bad) { out.innerHTML = '<div class="warnbox">表格读不准：' + esc(t.bad) + '。改好再点「预览」（这次没有发出去）。</div>'; return; }
+        if (!t.rows.length) { out.innerHTML = '<div class="warnbox">表格里没有内容（第一行是表头的话，下面要有词）。</div>'; return; }
+        if (t.rows.length > 500) { out.innerHTML = '<div class="warnbox">表格有 ' + t.rows.length + ' 行，一次最多导入 500 行：请分几次导入（这次没有发出去）。</div>'; return; }
+        const my = ++pvSeq; viewing = true; busy(b, true); lock(true); st.textContent = '正在预览 ' + t.rows.length + ' 行……';
+        let r = null, err = null; try { r = await wdCall('preview', { rows: t.rows }, 60000); } catch (er) { err = er; }
+        viewing = false; busy(b, false); lock(false);
+        if (!m.isConnected || my !== pvSeq) return;
+        if (err) { st.textContent = ''; out.innerHTML = '<div class="warnbox">没有预览成功：' + esc(wdErr(err)) + '</div>'; return; }
+        P = { rows: t.rows, plan: r.plan }; irid = null;
+        st.textContent = '按' + (t.sep === '\t' ? ' Tab ' : '逗号') + '分列，读到 ' + t.rows.length + ' 行';
+        out.innerHTML = impResHTML(r.plan); return;
+      }
+      if (ia === 'go') {
+        if (!P || going || viewing) return;
+        const ct = P.plan.counts || {};
+        const v = await ask('确认导入？', '新增 ' + num(ct.new) + ' 个词、更新 ' + num(ct.upd) + ' 个词（只改中文、例句中文、小提示）。整批一起写进词库，学生刷新页面后看到。', [['go', '导入', true], ['no', '先不']]);
+        if (v !== 'go' || !P || !m.isConnected || going) return;
+        if (!irid) irid = uuid4();   // 回复丢了再点一次用同一个编号：不会导两次
+        const my = pvSeq, P0 = P, sentText = ta.value; going = true; m.querySelectorAll('[data-ia]').forEach(x => x.disabled = true); lock(true); st.textContent = '正在导入……（这时先别改表格）';
+        let r = null, err = null; try { r = await wdCall('import', { rows: P0.rows, sig: P0.plan.sig, rid: irid }, 60000); } catch (er) { err = er; }
+        going = false; m.querySelectorAll('[data-ia]').forEach(x => x.disabled = false); lock(false);
+        if (!m.isConnected) { if (r && r.state === 'ok') { toast('已导入：新增 ' + num(r.new) + ' 个、更新 ' + num(r.upd) + ' 个'); wdAfter(); } return; }
+        if (err) {
+          if (unsure(err)) { st.textContent = '不知道导入了没有（' + err.message + '）：再点一次「确认导入」（不会导两次）'; const g = m.querySelector('[data-ia="go"]'); if (g && my === pvSeq) g.disabled = false; }
+          else { irid = null; st.textContent = ''; out.insertAdjacentHTML('afterbegin', '<div class="warnbox">没有导入：' + esc(wdErr(err)) + '</div>'); const g = m.querySelector('[data-ia="go"]'); if (g) g.disabled = true; }
+          return;
+        }
+        irid = null;
+        if (r.state === 'stale') { P = { rows: P0.rows, plan: r.plan }; st.textContent = ''; out.innerHTML = impResHTML(r.plan, r.msg); return; }
+        if (r.state === 'none') { P = null; st.textContent = ''; out.innerHTML = '<div class="note">' + esc(r.msg || '没有要导入的') + '</div>'; return; }
+        P = null; st.textContent = ''; if (ta.value === sentText) ta.value = '';   // 只清掉刚导入的这一份
+        const ids = Array.isArray(r.ids) ? r.ids : [];
+        out.innerHTML = '<div class="note pok" role="status">已导入：新增 <b>' + num(r.new) + '</b> 个、更新 <b>' + num(r.upd) + '</b> 个' + (r.dup ? '（刚才其实已经导入了，这次没有重复导入）' : '') + '。学生刷新页面后看到。</div>' +
+          (ids.length ? '<div class="small muted">新增的词编号：' + esc(ids.join('、')) + '（没有读音、没有 JLPT 题，已经列在「待补」里）</div><div><button type="button" class="gbtn" data-ia="cp">复制新词的编号</button></div>' : '');
+        m.dataset.ids = ids.join('\n');
+        wdAfter(); return;
+      }
+      if (ia === 'cp') { copyText(m.dataset.ids || ''); return; }
+    });
+    setTimeout(() => ta.focus(), 50);
+  }
+
   // ── 设置面板 ──
   const stepHTML = k => '<div class="step"><button type="button" data-k="' + k + '" data-dd="-1" aria-label="减少">−</button><input id="f-' + k + '" type="number" inputmode="' + (NUM[k][3] % 1 ? 'decimal' : 'numeric') + '" step="' + (NUM[k][3] % 1 ? '0.1' : '1') + '" min="' + NUM[k][1] + '" max="' + NUM[k][2] + '"><span class="u">' + NUM[k][0] + '</span><button type="button" data-k="' + k + '" data-dd="1" aria-label="增加">+</button></div>';
   const fld = (k, label, ctrl, extra = '') => '<div class="field" data-key="' + k + '" id="fd-' + k + '"><div class="fl"><span>' + label + '</span><span class="inh" id="i-' + k + '"></span>' + extra + '</div>' + ctrl + '</div>';
@@ -1080,7 +1406,24 @@ const Adm = (() => {
     if (!D || $('app').dataset.role !== 'adm' || e.target.closest('.modal')) return;
     const t = e.target;
     if (t.closest('button:disabled')) return;
-    const at = t.closest('[data-atab]'); if (at) { if (at.dataset.atab === tab || guard()) return; tab = at.dataset.atab; draft = null; if (tab === 'ex') EXA = null; if (tab === 'qs') QS = null; render(); return; }
+    const at = t.closest('[data-atab]'); if (at) { if (at.dataset.atab === tab || guard()) return; if (tab === 'wd') wdLeave(); tab = at.dataset.atab; draft = null; if (tab === 'ex') EXA = null; if (tab === 'qs') QS = null; render(); if (tab === 'wd') wdEnter(); return; }
+    if (tab === 'wd') {   // 第 40 步：词库
+      const wi = t.closest('[data-wdid]'); if (wi) { wordModal(wi.dataset.wdid); return; }
+      const wl = t.closest('[data-wdlv],[data-wdst]'); if (wl) {
+        wdInit(); const qi = $('wdqi'); if (qi) WD.q = qi.value.trim().slice(0, 30);
+        if (wl.dataset.wdlv !== undefined) WD.lv = wl.dataset.wdlv; else WD.st = wl.dataset.wdst;
+        document.querySelectorAll('[data-wdlv]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.wdlv === WD.lv)));
+        document.querySelectorAll('[data-wdst]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.wdst === WD.st)));
+        wdFind(0); return;
+      }
+      const wp = t.closest('[data-wdpg]'); if (wp) { if (!wp.disabled && WD && !WD.busy) { wdFind(num(wp.dataset.wdpg)); const el = $('wdres'); if (el) el.scrollIntoView({ block: 'start' }); } return; }
+      const wa = t.closest('[data-wa]'); if (wa) {
+        if (wa.dataset.wa === 'imp') impModal();
+        else if (wa.dataset.wa === 'refind') wdFind();
+        else if (wa.dataset.wa === 'todocopy') copyText(((WD && WD.todo && WD.todo.rows) || []).map(x => x.id).join('\n'));
+        return;
+      }
+    }
     if (tab === 'qs') { const qa = t.closest('[data-qa]'); if (qa) { qsAct(qa); return; } }
     if (tab === 'ex') {
       const xa = t.closest('[data-xa]'); if (xa) { exaAct(xa); return; }
@@ -1160,6 +1503,8 @@ const Adm = (() => {
     if (!D || $('app').dataset.role !== 'adm' || document.querySelector('.modal')) return;
     const st = e.target.closest && e.target.closest('[data-stu]');
     if (st && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); detailModal(st.dataset.stu); }
+    const wi = e.target.closest && e.target.closest('.it[data-wdid]');   // 第 40 步：词库的一行
+    if (wi && tab === 'wd' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); wordModal(wi.dataset.wdid); }
   });
   window.addEventListener('beforeunload', e => { if (dirtyCount()) { e.preventDefault(); e.returnValue = ''; } });
   return { start };

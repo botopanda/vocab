@@ -315,7 +315,7 @@ const Stu = (() => {
       const from = c.src === 'carry' ? '<span class="chip warn">上周错词</span>' : c.src === 'extra' ? '<span class="chip">追加</span>' : '';
       return '<button type="button" class="wc' + (s[0] ? ' ' + s[0] : '') + '" data-wid="' + esc(c.id) + '" aria-label="' + esc(c.w) + '，' + s[1] + '，点一下从这个词开始练"><b lang="ja">' + esc(c.w) + '</b><span class="tags"><span class="chip' + (s[0] ? ' ' + s[0] : '') + '">' + s[1] + '</span>' + from + '</span></button>';
     };
-    return '<div class="box"><div class="row"><h2 class="lh">本周全部词 <small>' + cs.length + ' 个</small></h2><button type="button" class="gbtn" data-act="unlist">返回学习</button></div>' +
+    return '<div class="box"><div class="row"><h2 class="lh">本周全部词 <small>' + cs.length + ' 个</small></h2><span class="copyrow"><button type="button" class="gbtn" data-act="prweek">打印</button><button type="button" class="gbtn" data-act="unlist">返回学习</button></span></div>' +   // 第 40 步：打印
       '<div class="muted">还没练 ' + nNot + ' · 练过 ' + (cs.length - nNot - nAgain) + ' · 今天要再练 ' + nAgain + '。点一个词，就从这个词开始练。</div>' +
       '<div class="wl">' + cs.map(cell).join('') + '</div></div>' +
       '<div class="bar one"><button type="button" class="btn" data-act="unlist">返回学习</button></div>';
@@ -1349,8 +1349,10 @@ const Stu = (() => {
     const dr = wlDrill();
     h += '<div class="row wsum"><span class="small muted" role="status">' + (WL.busy ? '正在读取…… ' : '') + '符合条件 <b>' + tot + '</b> 个（词表一共 ' + num(r.all) + ' 个）</span>' +
       (dr ? '<button type="button" class="gbtn" data-act="wdrill"' + (dr.scope && tot ? '' : ' disabled') + '>带去刷题</button>' : '') +
-      (has38() && tot ? (lsOn() ? '<button type="button" class="gbtn" data-wlq="listen"' + (lqLoading || WL.busy ? ' disabled' : '') + '>随身听</button>' : '') + (qfOn() ? '<button type="button" class="gbtn" data-wlq="flash"' + (lqLoading || WL.busy ? ' disabled' : '') + '>快刷</button>' : '') : '') + '</div>' +   // 第 38 步：筛选还在读的时候先灰着
+      (has38() && tot ? (lsOn() ? '<button type="button" class="gbtn" data-wlq="listen"' + (lqLoading || WL.busy ? ' disabled' : '') + '>随身听</button>' : '') + (qfOn() ? '<button type="button" class="gbtn" data-wlq="flash"' + (lqLoading || WL.busy ? ' disabled' : '') + '>快刷</button>' : '') : '') +   // 第 38 步：筛选还在读的时候先灰着
+      (tot ? '<button type="button" class="gbtn" data-act="wprint"' + (lqLoading || WL.busy ? ' disabled' : '') + '>打印</button>' : '') + '</div>' +   // 第 40 步：打印筛出来的词（同样先灰着）
       (has38() && tot > LQMAX && (lsOn() || qfOn()) ? '<div class="small muted">从词表带去随身听、快刷一次最多带前 ' + LQMAX + ' 个（按现在的排序）；想听后面的，换个排序或多筛几个条件。</div>' : '') +
+      (tot > PRMAX ? '<div class="small muted">' + (has38() && tot > LQMAX && (lsOn() || qfOn()) ? '打印也一样，一次最多印前 ' : '打印一次最多印前 ') + PRMAX + ' 个（按现在的排序）。</div>' : '') +   // 第 40 步
       (dr && dr.why ? '<div class="small muted">' + esc(dr.why) + '</div>' : '') +
       (WL.sort === 'recent' ? '<div class="small muted">「最近学过」按最近一次在学习页练、每天复习这个词的时间排；以前的记录没记时间的排在后面。</div>' : '') + pager +
       (rows.length ? '<div class="wlist">' + rows.map(wlRow).join('') + '</div>' : '<div class="muted">没有符合条件的词。' + (WL.q || WL.lv.size || WL.st.size ? '少选几个条件试试。' : '') + '</div>') + pager;
@@ -1577,7 +1579,8 @@ const Stu = (() => {
   //   base 原来的顺序, list 现在的顺序, order, seed, i 第几个词, st 这个词播到第几条, playing 正在播, tok 播放编号（换词、暂停时作废旧的等待）, timer, gen,
   //   wait 两条之间正在停, flip 快刷翻面了没有, done 播完／刷完, showM 遮住中文时这个词点开看了}
   let LQ = null, LQSRC = null, lqSeq = 0, lqLoading = false, qfSwipeAt = 0, qfDown = null, wake = null, qfMarkAt = 0, lqChecking = false;
-  const lqWords = src => (src === 'week' ? cards() : src === 'err' ? (D.errbook || []) : []).map(c => ({ id: c.id, w: c.w, r: c.r, m: c.m, lvl: c.lvl, ex: Array.isArray(c.ex) ? c.ex : [], off: !!c.off }));
+  // 第 40 步：停用的词不带（错词本里停用的词照常列着、标「已停用」，但不进随身听、快刷）
+  const lqWords = src => (src === 'week' ? cards() : src === 'err' ? (D.errbook || []) : []).filter(c => !c.off).map(c => ({ id: c.id, w: c.w, r: c.r, m: c.m, lvl: c.lvl, ex: Array.isArray(c.ex) ? c.ex : [], off: !!c.off }));
   const lqName = k => k === 'listen' ? '随身听' : '快刷';
   // 现在不能用的原因（开了考还没交卷、老师关了）；能用＝空
   const lqBlockMsg = kind => examOpen() ? '这周的测验开了考还没交卷：先交卷，再用' + lqName(kind) + '（和刷题、词表一样）'
@@ -1791,7 +1794,7 @@ const Stu = (() => {
   // 「进度」页的入口：选用哪些词（本周的词／错词本；词表里筛的从「全部词表」进去），再点随身听或快刷
   function lqEntry() {
     if (!has38() || (!lsOn() && !qfOn())) return '';
-    const nw = cards().length, ne = (D.errbook || []).length;
+    const nw = cards().length, ne = (D.errbook || []).filter(c => !c.off).length;   // 第 40 步：停用的词不算
     if (!LQSRC || (LQSRC === 'week' && !nw) || (LQSRC === 'err' && !ne)) LQSRC = nw ? 'week' : ne ? 'err' : null;
     const ex = examOpen(), n = LQSRC === 'week' ? nw : LQSRC === 'err' ? ne : 0, dis = ex || !n ? ' disabled' : '';
     return '<div class="box" id="lqbox"><h2>随身听 · 快刷 <small>不算学习记录、不算打卡</small></h2>' +
@@ -1828,7 +1831,8 @@ const Stu = (() => {
     if (err) { busy(btn, false); fail(err); return; }
     if (bad) { WL.res = bad.state ? bad : null; render(); toast(bad.msg || '没读到词表'); return; }   // 开考了、老师关了词表：和词表页一样停
     if (!rows.length) { busy(btn, false); toast('这个筛选现在没有词了'); wlLoad(); return; }
-    const list = rows.map(x => ({ id: x.id, w: x.w, r: x.r, m: x.m, lvl: x.lvl, ex: [], nex: 2, off: !!x.off }));
+    const list = rows.filter(x => !x.off).map(x => ({ id: x.id, w: x.w, r: x.r, m: x.m, lvl: x.lvl, ex: [], nex: 2, off: !!x.off }));   // 第 40 步：停用的词不带
+    if (!list.length) { busy(btn, false); toast('筛出来的词都已经停用了'); return; }
     wlDrop();
     lqOpen(kind, 'wl', list, '词表筛出来的 ' + list.length + ' 个', 'words', 'wl:' + JSON.stringify({ lv: args.lv.slice().sort(), st: args.st.slice().sort(), q: args.q, sort: args.sort }));
   }
@@ -1840,12 +1844,123 @@ const Stu = (() => {
     render(); refreshSide('map'); tyLoad();
   }
 
+  // ── 第 40 步：打印词单（本周的词、错词本、词表筛出来的）：浏览器打印（app.js 的 printDialog），不改学习记录、不算练过、不打卡。
+  // 复查第 1 轮后：学生真的要打印时都和服务器核对（stu_info print：不改学习记录、成绩、词库、周，只会照全站规则更新访问时间；这周开了考还没交卷就不给；本周的词、错词本也用服务器这时给的词）——
+  //   别的设备刚开了考，这个旧页面也印不出带答案的默写纸。打印对话框、预览开着时离开这一页又回来、点「打印预览」「打印」时也各核对一次（见 app.js）。
+  //   不在学生页首页轮询。数据库还没跑第 40 步（没有 print）时照以前：用学生页已经读到的内容、只看页面知道的开考状态。
+  // 词表筛出来的按现在的筛选一页一页读（最多 300 个，和随身听、快刷一样），再一次取 100 个的词性和例句（这两种读取服务器也会核对开考）。停用的词不印（写明几个没印）
+  let PRSRC = null, prBusy = false;
+  const PRMAX = 300;   // 从词表打印一次最多几个（按现在的排序取前 300 个）
+  const prOk = c => !!c && !c.off;
+  const prOf = c => ({ id: c.id, w: c.w, r: c.r, p: c.p, m: c.m, ex: Array.isArray(c.ex) ? c.ex : [] });
+  const prBlockMsg = () => examOpen() ? '这周的测验开了考还没交卷：先交卷，再打印（和词表一样）' : '';
+  const prOld = e => /不认识的操作/.test((e && e.message) || '');   // 数据库还没跑第 40 步
+  // 打印前核对（给 printDialog 的 check）：src week／err／wl。核对不过：{ok:false, msg}
+  async function prCheck(src) {
+    let r;
+    try { r = await rpc('stu_info', { act: 'print', a: { src, check: true } }, { obj: true, timeout: 20000 }); }
+    catch (e) {
+      if (!prOld(e)) throw e;
+      if (src !== 'wl') return prBlockMsg() ? { ok: false, msg: prBlockMsg() } : { ok: true };
+      r = await rpc('stu_info', { act: 'list', a: { off: 100000 } }, { obj: true, timeout: 20000 });   // 旧数据库：词表的读取照样核对开考、老师关没关词表
+    }
+    return r && r.state === 'ok' ? { ok: true } : { ok: false, msg: (r && r.msg) || '现在不能打印' };
+  }
+  // 核对出来开了考（或者老师关了词表）：重新读一次学生页（页面上也写开考了）
+  const prBlocked = () => { if (tab === 'map' || tab === 'err') refreshSide(tab); else reload('', true); };
+  // src：week 本周的词／err 错词本（全部）／errf 错词本页现在筛出来的
+  async function prOpen(src, btn) {
+    if (prBusy) return;
+    const bm = prBlockMsg(); if (bm) { toast(bm); return; }
+    prBusy = true; busy(btn, true);
+    const ss = src === 'errf' ? 'err' : src;
+    let r = null, err = null;
+    try { r = await rpc('stu_info', { act: 'print', a: { src: ss } }, { obj: true, timeout: 20000 }); } catch (e) { err = e; }
+    prBusy = false; busy(btn, false);
+    if (err && !prOld(err)) { fail(err); return; }
+    const info = { who: D.me.name, exOk: true, check: () => prCheck(ss), onBlock: prBlocked };
+    let ws, off;
+    if (r) {
+      if (r.state === 'exam' || r.state === 'off') { toast(r.msg || '现在不能打印'); prBlocked(); return; }
+      if (r.state !== 'ok') { toast(r.msg || '现在没有可以打印的词'); return; }
+      ws = Array.isArray(r.words) ? r.words.map(prOf) : []; off = num(r.off);
+      if (src === 'week') info.title = '本周的词（第 ' + num(r.week && r.week.no) + ' 周）';
+    } else {   // 旧数据库：用学生页已经读到的
+      ws = (src === 'week' ? cards() : D.errbook || []).filter(prOk).map(prOf); off = src === 'week' ? 0 : (D.errbook || []).filter(c => !prOk(c)).length;
+      if (src === 'week') info.title = '本周的词（第 ' + D.week.no + ' 周）';
+    }
+    if (src !== 'week') {
+      const eb = D.errbook || [], list = src === 'errf' ? eb.filter(esPass) : eb;
+      if (list.length < eb.length) { const keep = new Set(list.map(c => c.id)); ws = ws.filter(x => keep.has(x.id)); off = list.filter(c => !prOk(c)).length; }   // 错词本页筛出来的：只印筛出来的那些
+      info.title = '错词本' + (list.length < eb.length ? '（筛出来的 ' + ws.length + ' 个）' : '');
+    }
+    info.words = ws; info.note = off ? '已停用的 ' + off + ' 个不印' : '';
+    printDialog(info);
+  }
+  // 「进度」页的入口：选打印哪些词（本周的词／错词本；词表里筛的从「全部词表」进去，筛好点「打印」）
+  function prEntry() {
+    const nw = cards().length, ne = (D.errbook || []).filter(prOk).length;
+    if (!nw && !ne && !wlOn()) return '';
+    if (!PRSRC || (PRSRC === 'week' && !nw) || (PRSRC === 'err' && !ne)) PRSRC = nw ? 'week' : ne ? 'err' : null;
+    const ex = examOpen(), n = PRSRC === 'week' ? nw : PRSRC === 'err' ? ne : 0;
+    return '<div class="box" id="prbox"><h2>打印词单 <small>不算学习记录</small></h2>' +
+      '<div class="small muted">默写纸（印中文，写法、读音两栏空着）后面自动附答案页；也可以印成日文表。用手机、电脑的浏览器打印（A4 纸）。</div>' +
+      (ex ? '<div class="warnbox">这周的测验开了考还没交卷：先交卷，再打印</div>' : '') +
+      '<div class="checks lqsrc" role="group" aria-label="打印哪些词">' + [['week', '本周的词', nw], ['err', '错词本', ne]].map(([k, nm, c]) => '<button type="button" class="ck" data-prsrc="' + k + '" aria-pressed="' + (PRSRC === k) + '"' + (c ? '' : ' disabled') + '>' + nm + ' <small>' + c + '</small></button>').join('') +
+      (wlOn() ? '<button type="button" class="ck" data-act="words">从全部词表里筛…</button>' : '') + '</div>' +
+      (!nw && D.week.kind === 'R' ? '<div class="small muted">回顾周没有本周词单，可以打印错词本，或者在全部词表里筛好以后点「打印」。</div>' : '') +
+      '<div class="lqgo"><button type="button" class="btn" data-act="prgo"' + (ex || !n ? ' disabled' : '') + '>打印…' + (n ? '（' + n + ' 个）' : '') + '</button></div></div>';
+  }
+  // 从词表「打印」：按现在的筛选从第一页起读（最多 300 个），再取词性和例句（数据库跑过第 40 步才有这种取法；没有就只印写法、读音、中文）。
+  // 和「随身听／快刷这些词」共用同一个批次编号（lqSeq）：读的时候换了筛选、重新核对、离开了词表页，这一批就作废，不弹打印
+  async function wlPrint(btn) {
+    if (!WL || tab !== 'words' || lqLoading || WL.busy || !WL.res || WL.res.state !== 'ok') return;
+    const bm = prBlockMsg(); if (bm) { toast(bm); return; }
+    const args = wlArgs(), my = ++lqSeq, ws = wlSeq, rows = [], seen = new Set();
+    lqLoading = true; busy(btn, true); toast('正在读这些词……');
+    const stale = () => my !== lqSeq || ws !== wlSeq || tab !== 'words';
+    const quit = () => { if (my === lqSeq) { lqLoading = false; if (tab === 'words' && !PR) wlPaint(); } };
+    let err = null, bad = null, want = PRMAX, exWhy = '';
+    for (let off = 0; off < want; off += 100) {
+      let r = null;
+      try { r = await rpc('stu_info', { act: 'list', a: Object.assign({}, args, { off }) }, { obj: true, timeout: 20000 }); } catch (e) { err = e; break; }
+      if (stale()) { quit(); return; }
+      if (!r || r.state !== 'ok' || !Array.isArray(r.rows)) { bad = r || {}; break; }
+      if (off === 0) want = Math.min(num(r.total), PRMAX);   // 这一批的总数：第一页回来时定下
+      for (const x of r.rows) if (x && x.id && !seen.has(x.id) && rows.length < want) { seen.add(x.id); rows.push(x); }
+      if (r.rows.length < num(r.size, 100)) break;
+    }
+    const ids = rows.filter(prOk).map(x => x.id), full = new Map();
+    for (let i = 0; i < ids.length && !err && !bad; i += 100) {
+      let r = null;
+      try { r = await rpc('stu_info', { act: 'cards', a: { ids: ids.slice(i, i + 100) } }, { obj: true, timeout: 20000 }); }
+      catch (e) { if (/不认识的操作/.test(e.message)) { exWhy = '数据库更新以后，从词表打印才能带例句和词性。'; break; } err = e; break; }
+      if (stale()) { quit(); return; }
+      if (!r || r.state !== 'ok' || !Array.isArray(r.cards)) { bad = r || {}; break; }
+      for (const c of r.cards) if (c && c.id) full.set(c.id, c);
+    }
+    if (stale()) { quit(); return; }
+    lqLoading = false; quiet();
+    if (err) { fail(err); wlPaint(); return; }
+    if (bad) { WL.res = bad.state ? bad : null; render(); toast(bad.msg || '没读到词表'); return; }   // 开考了、老师关了词表：和词表页一样停
+    wlPaint();
+    // 停用的：第一次读的列表里已经停用的＋取词性例句时（第二次读）才停用的（复查第 1 轮建议：按第二次取到的再过滤一遍）
+    const offNow = ids.filter(id => full.has(id) && !prOk(full.get(id))).length, off = rows.length - ids.length + offNow;
+    const words = rows.filter(x => prOk(x) && (exWhy || (full.has(x.id) && prOk(full.get(x.id))))).map(x => full.has(x.id) ? prOf(full.get(x.id)) : { id: x.id, w: x.w, r: x.r, m: x.m, ex: [] });
+    const miss = ids.length - offNow - words.length;   // 读第一页以后老师改了范围：这几个已经不在词表里，不印
+    if (!words.length) { toast(rows.length ? '筛出来的词现在没有可以打印的（停用了，或者已经不在你的词表里）' : '这个筛选现在没有词了'); return; }
+    const desc = [args.lv.length ? LV.filter(l => args.lv.includes(l)).join('、') : '', args.st.length ? WST.filter(([k]) => args.st.includes(k)).map(([, n]) => n).join('、') : '', args.q ? '搜「' + args.q + '」' : ''].filter(Boolean).join(' · ');
+    printDialog({ title: '词表' + (desc ? '（' + desc + '）' : '（全部）'), who: D.me.name, words, exOk: !exWhy, exWhy, check: () => prCheck('wl'), onBlock: () => { if (tab === 'words') wlRecheck(); },
+      note: [off ? '已停用的 ' + off + ' 个不印' : '', miss ? miss + ' 个刚刚不在你的词表里了，没印' : ''].filter(Boolean).join('；') });
+  }
+
   // ── 错词本 ──
   function errHTML() {
     if (!D.errbook.length) return '<div class="box"><h2>错词本是空的</h2><div class="muted">测验答错的词会放到这里。</div></div>';
     let h = has37() ? esFilter() : '';
     const list = D.errbook.filter(esPass);
-    h += '<div class="muted">一共 ' + D.errbook.length + ' 个' + (list.length < D.errbook.length ? '，筛出来 ' + list.length + ' 个' : '') + '，最近一周错的排在前面。</div>';
+    h += '<div class="row errtop"><span class="muted">一共 ' + D.errbook.length + ' 个' + (list.length < D.errbook.length ? '，筛出来 ' + list.length + ' 个' : '') + '，最近一周错的排在前面。</span>' +
+      (list.some(prOk) ? '<button type="button" class="gbtn" data-act="prerr">打印' + (list.length < D.errbook.length ? '筛出来的' : '') + '</button>' : '') + '</div>';   // 第 40 步：打印（停用的不印）
     return h + list.map(c => '<div class="card">' + cardBack(c, { chip: '<span class="chip warn">错过 ' + num(c.wrong) + ' 次</span>' + (c.st === 'correct' ? ' <span class="chip ok">后来答对了</span>' : '') + (c.pok ? ' <span class="chip ok">练习答对过</span>' : '') + (c.off ? ' <span class="chip">已停用</span>' : '') }).replace('</div>', '</div>' + esLine(c)) + '</div>').join('');   // 错在哪：放在词的下面一行
   }
 
@@ -1921,7 +2036,7 @@ const Stu = (() => {
   function mapHTML() {
     const c = D.cfg, si = LV.indexOf(c.start), s = D.stats || { streak: 0, learned: 0, correct: 0, passed: 0, days: 0, last30: [] };
     const skipped = l => c.mode === 'only' ? !(c.only || []).includes(l) : c.mode === 'step' ? LV.indexOf(l) < si : false;
-    let h = wlEntry() + lqEntry() + '<div class="box"><h2>我的进度</h2><div class="stats">' +
+    let h = wlEntry() + lqEntry() + prEntry() + '<div class="box"><h2>我的进度</h2><div class="stats">' +   // 第 40 步：打印词单
       '<div class="stat"><b>' + num(s.streak) + ' 天</b><span>连续打卡</span></div><div class="stat"><b>' + num(s.learned) + '</b><span>学过的词（累计）</span></div><div class="stat"><b>' + num(s.correct) + '</b><span>现在全亮的词</span></div></div>';
     const on = new Set(s.last30 || []);
     let cal = ''; for (let i = 29; i >= 0; i--) { const k = addDays(D.week.today, -i), [, mm, dd] = k.split('-'); cal += '<i' + (on.has(k) ? ' class="f"' : '') + ' title="' + (+mm) + '月' + (+dd) + '日"></i>'; }
@@ -2000,6 +2115,7 @@ const Stu = (() => {
     const lqs = t.closest('[data-lqsrc]'); if (lqs) { if (!lqs.disabled && tab === 'map') { LQSRC = lqs.dataset.lqsrc; render(); } return; }
     const lqg = t.closest('[data-lq]'); if (lqg) { if (!lqg.disabled && tab === 'map' && !T && LQSRC) { unlockAudio(); const k = lqg.dataset.lq; lqOpen(k, LQSRC, lqWords(LQSRC), LQSRC === 'week' ? '本周的词' : '错词本', 'map', LQSRC === 'week' ? 'week:' + D.week.id : 'err'); } return; }
     const wq = t.closest('[data-wlq]'); if (wq) { if (!wq.disabled && tab === 'words') wlLq(wq.dataset.wlq, wq); return; }
+    const prs = t.closest('[data-prsrc]'); if (prs) { if (!prs.disabled && tab === 'map') { PRSRC = prs.dataset.prsrc; render(); } return; }   // 第 40 步：打印哪些词
     const lsk = t.closest('[data-lsk]'); if (lsk) {
       if (!LQ || LQ.kind !== 'listen') return;
       const c = lsCfg(), k = lsk.dataset.lsk, d = +lsk.dataset.lsd;
@@ -2048,6 +2164,11 @@ const Stu = (() => {
     if (act === 'qfagain') { if (LQ && LQ.kind === 'flash') { LQ.done = false; LQ.i = 0; LQ.flip = false; qfSave(); render(); window.scrollTo({ top: 0 }); } return; }
     if (act === 'qfbad') { if (LQ && LQ.kind === 'flash') { const mk = qfMarks(), L = LQ.list.filter(w => mk[w.id] === 'n'); if (L.length) { const o = LQ; lqOpen('flash', o.src, L, '标了「不会」的 ' + L.length + ' 个', o.from, o.sig + ':n'); } } return; }
     if (act === 'lqback') { lqBack(); return; }
+    // 第 40 步：打印（只打开打印的对话框；不改学习记录）
+    if (act === 'prgo') { if (tab === 'map' && !T && PRSRC) prOpen(PRSRC, a); return; }
+    if (act === 'prweek') { if (!T) prOpen('week', a); return; }
+    if (act === 'prerr') { if (tab === 'err' && !T) prOpen('errf', a); return; }
+    if (act === 'wprint') { if (tab === 'words') wlPrint(a); return; }
     if (act === 'dlvall') { if (DS && !PR) { DS.lvBad = null; DS.lvGone = null; DS.lvWant = []; DS.lv = new Set(); render(); dCount(); } return; }   // 第 37 步：学生确认改成全部档
     if (act === 'dstart') { if (!DS || PR || T) return; if (dPre) { toast('正在按词表的筛选选好，稍等'); return; } if (DS.lvBad) { toast('先在「档」里重新选'); return; } const want = dWant(); if (!want || !DS.scope) { toast('先选好刷哪些词和题数'); return; } dStart(Object.assign(dArgs(), { n: want }), '刷题'); return; }
     if (act === 'dagain') { if (PR && PR.kind === 'drill' && !PR.busy) dStart({ pid: PR.id }, '再刷一遍做错的'); return; }

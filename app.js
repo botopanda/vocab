@@ -6,6 +6,7 @@ const LV = ['N5', 'N4', 'N3', 'N2', 'N1'];
 const CV = 20;   // 网页版本：打开、开考、出练习时告诉数据库，太旧的网页会被提示刷新。第 38 步起是 20（能播「听音选意思」的题）；学生页打开（stu_load）仍然 18 以上都收，
                  // 旧学生页不用强制刷新——只有卷子里有听音题时旧页开考才提示刷新，组后小练也只给 20 以上的页面出听音题。
                  // 第 39 步没有升：旧页照样能评「一个月后抽查」的词（只是不标「抽查」）、照样复习本轮和打卡（只是没有每天的目标）
+                 // 第 40 步也没有升：打印都在网页上做、不写学习记录；旧页只是没有打印按钮，服务器不用挡旧页
 
 // 调数据库门卫函数。opt.obj：必须返回一个对象；opt.str：必须返回文字（空的、格式不对都当失败，不拿旧数据凑合）
 // opt.timeout：等这么多毫秒还没收到回复就不等了（当作网络断了：服务器可能做了，也可能没做）
@@ -308,6 +309,284 @@ async function copyText(t, input) {
   catch (e) { if (input) { input.select(); toast('请长按选中后复制'); } }
 }
 const siteBase = () => location.origin + location.pathname;
+
+// ── 第 40 步：打印词单（学生端、管理端共用）。用浏览器打印，不生成 PDF 文件；这里不改学习记录 ──
+// info＝{title 纸上写的哪一份（本周的词（第 3 周）／错词本…）, who 学生名字, words [{id, w, r, p, m, ex [[日文例句, 中文], …]}], exOk 有没有例句可以印, exWhy 没有的原因,
+//        note 对话框里多说一句（停用的没印等）, check 学生端：真的要印之前和服务器核对一次（这周开了考还没交卷等），返回 Promise<{ok, msg}>；管理端没有}
+// 版式：默写纸（只印中文、词性，写法、读音两栏空着；后面自动附答案页）／日文表（写法、读音、中文都印）。选项：打乱顺序、每页最多几行、带不带例句（只印第 1 个例句）。
+// 复查第 1 轮后：
+//   · 真正打印时另开一个空白页（地址是 about:blank，没有学生、老师的钥匙），只把排好版要用的文字传过去，在那一页里重新排版再打印——
+//     浏览器在纸上印页眉页脚（网址、标题）时也印不出钥匙。本页上的预览只给人看；本页被浏览器菜单直接打印时只印一句提示。
+//   · 「每页几行」是上限：按实际内容排，一行字多就提前换页，纸上不裁字（答案页按同样的题号另外排）。
+//   · 纸上留页边距（@page 上下 11mm、左右 12mm），内容 184×270mm：浏览器不认 @page、用自己默认的页边距（一般不超过 12.7mm）也放得下，
+//     打开页眉页脚时印在页边距里，一张纸不会被挤成两张。
+//   · 学生端开着打印对话框或预览时离开这一页再回来：先遮住，和服务器核对过（没开考）再显示；点「打印预览」「打印」时也各核对一次。
+// 复查第 2 轮后：
+//   · 学生的打印页只用一次：系统打印结束或取消（afterprint）以后就清掉纸面，再印要回原来的页面点「打印」（会再核对一次）；
+//     自动打印没弹出来的浏览器，打印页上的「打印」按钮可以点一次。管理端的打印页不清（老师常要多印几份、存 PDF；管理端打印不受开考限制，没有要核对的）。
+//   · 打开打印页以后马上断开它和本页的联系（opener），再把它换成一个新的空白页（直接打开的空白页，document.referrer 是本页带钥匙的地址；
+//     本页设了 no-referrer，换过去的新空白页就没有来源网址）；打印页加载字体前也写明不带来源网址（no-referrer）。
+//   · 本页（地址带钥匙）被浏览器菜单直接打印：不管开没开预览都只印一句提示，页边距 0（Chrome 默认设置下页眉页脚没有地方印网址），见 style.css。
+const PRT_MAX = 500, PRT_KEY = 'vocab_prt', PRT_ROWS = [10, 15, 20, 25, 30], PRT_ROWS_EX = [6, 8, 10, 12];
+function prtGet() {
+  let o = {}; try { const v = JSON.parse(localStorage.getItem(PRT_KEY) || 'null'); if (v && typeof v === 'object' && !Array.isArray(v)) o = v; } catch (e) {}
+  return { kind: o.kind === 'tbl' ? 'tbl' : 'dict', shuf: o.shuf === true, ex: o.ex === true, rows: PRT_ROWS.includes(o.rows) ? o.rows : 20, rowsEx: PRT_ROWS_EX.includes(o.rowsEx) ? o.rowsEx : 8 };
+}
+function prtPut(o) { try { localStorage.setItem(PRT_KEY, JSON.stringify(o)); } catch (e) {} }
+const prtCredit = () => { const t = ((document.querySelector('footer.credit') || {}).textContent || '').split('｜')[0].trim(); return t || '词表：以 Jonathan Waller 整理的 JLPT 词表（tanos.co.uk，CC BY）为底本，本站做了删改和补充'; };
+const prtEx = x => Array.isArray(x.ex) && Array.isArray(x.ex[0]) && x.ex[0][0] ? x.ex[0] : null;
+// 纸面的样式：本页的预览和另开的打印页共用这一份（打印页里没有本站的 style.css）
+const PRT_FONT_URL = 'https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@600&family=Noto+Sans+JP:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap';
+const PRT_CSS = (() => {
+  const SANS = '"Noto Sans SC","PingFang SC","Microsoft YaHei","Hiragino Sans GB",sans-serif', JP = '"Noto Sans JP","Hiragino Sans","Yu Gothic","Meiryo",sans-serif', MIN = '"Zen Old Mincho","Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif';
+  return '.pg{width:184mm;height:270mm;padding:0;box-sizing:border-box;background:#fff;color:#111;display:flex;flex-direction:column;overflow:hidden;font-family:' + SANS + ';font-size:10.5pt;line-height:1.35;color-scheme:light;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+    '.pg *{box-sizing:border-box}' +
+    '.pgh{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:1.5mm 6mm;padding-bottom:2.5mm;border-bottom:.5mm solid #111;flex:none}.pgh b{font-size:14pt;font-weight:700}' +
+    '.pgs{font-size:9pt;color:#444}.pgl{flex-basis:100%;font-size:10pt;color:#222}' +
+    '.pgb{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}' +
+    '.pr{display:grid;grid-template-columns:9mm minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1fr);border-bottom:.25mm solid #999;flex:none}' +
+    '.pg-tbl .pr{grid-template-columns:9mm minmax(0,1fr) minmax(0,1fr) minmax(0,1.5fr)}.pr.pr2{grid-template-rows:auto minmax(0,1fr)}' +
+    '.pr.ph{font-size:8.5pt;color:#555;border-bottom:.35mm solid #333}.pr.ph .pc{padding-block:1mm}' +
+    '.pn{font-size:8.5pt;color:#666;padding:1.4mm 1mm 0 0;text-align:right;font-variant-numeric:tabular-nums}' +
+    '.pc{padding:1.2mm 2mm;min-width:0;border-left:.2mm solid #ccc;overflow-wrap:anywhere}' +
+    '.pm{font-size:10.5pt}.pp{font-size:7.5pt;color:#666;margin-left:2mm;white-space:nowrap}' +
+    '.pj{font-family:' + MIN + ';font-size:14pt;font-weight:600;line-height:1.25}.pk{font-family:' + JP + ';font-size:10.5pt}.pna{font-size:8pt;color:#999}' +
+    '.pex{font-family:' + JP + ';font-size:8.5pt;line-height:1.9;color:#222}.pg ruby{ruby-align:start}.pg ruby rt{font-size:.55em;color:#555;font-weight:400}' +
+    '.pg mark{background:none;color:inherit;font-weight:700;text-decoration:underline;padding:0;border-radius:0}' +
+    '.pz{font-size:8pt;color:#555}.px{grid-column:2 / -1;padding:0 2mm .8mm;display:flex;flex-wrap:wrap;gap:0 3mm;align-items:baseline;min-width:0;border-left:.2mm solid #ccc;overflow-wrap:anywhere}' +
+    '.pblank{letter-spacing:.1em;color:#111}' +
+    '.pgf{display:flex;justify-content:space-between;gap:6mm;font-size:7pt;color:#666;padding-top:2mm;border-top:.25mm solid #999;flex:none}.pgf span:last-child{white-space:nowrap}';
+})();
+try { const st = document.createElement('style'); st.id = 'prtcss'; st.textContent = PRT_CSS; document.head.appendChild(st); } catch (e) {}
+// 排版：按 M 一行一行放进 A4 页里——一页最多 M.per 行；放进一行以后这一页装不下了（字多的行比较高），这一行就挪到下一页（每页第一行总能放下）。
+// 每一行至少有「一页的高度÷per」高（行少的页也是同样的行高，好写字）。答案页按同样的顺序、同样的题号另外排。只用参数，不用外面的东西：打印页里也原样用它。
+// M＝{kinds [[k, 名字]], rows {k: [一行的 html]}, per, total, title, who, when, credit, ex}；返回页数
+function prtPaginate(doc, root, M) {
+  const E = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const HD = { dict: ['', '中文', '写法', '读音'], ans: ['', '中文', '写法', '读音'], tbl: ['', '写法', '读音', '中文'] };
+  root.innerHTML = '';
+  const made = [];
+  for (const [k, nm] of M.kinds) {
+    const list = (M.rows && M.rows[k]) || [];
+    let i = 0;
+    while (i < list.length) {
+      const pg = doc.createElement('section');
+      pg.className = 'pg pg-' + k + (M.ex ? ' pg-ex' : '');
+      pg.innerHTML = '<header class="pgh"><div><b>' + E(nm) + '</b>　' + E(M.title) + '</div><div class="pgs">' + (M.who ? E(M.who) + '　' : '') + E(M.when) + '</div>' +
+        (k === 'dict' ? '<div class="pgl">姓名＿＿＿＿＿＿　日期＿＿＿＿＿　对了＿＿＿／' + E(M.total) + '</div>' : k === 'ans' ? '<div class="pgl">答案（第 <span class="pga"></span> 个）</div>' : '') +
+        '</header><div class="pgb"><div class="pr ph">' + HD[k].map(t => '<div class="pc">' + t + '</div>').join('') + '</div></div><footer class="pgf"><span>' + E(M.credit) + '</span><span class="pgn"></span></footer>';
+      root.appendChild(pg);
+      const body = pg.querySelector('.pgb'), mh = Math.max(0, Math.floor((body.clientHeight - body.firstElementChild.offsetHeight) / M.per) - 1);
+      const a = i;
+      while (i < list.length && i - a < M.per) {
+        body.insertAdjacentHTML('beforeend', list[i]);
+        const r = body.lastElementChild; r.style.minHeight = mh + 'px';
+        if (i > a && body.scrollHeight > body.clientHeight + 1) { r.remove(); break; }   // 这一页装不下了：这一行挪到下一页
+        i++;
+      }
+      const ga = pg.querySelector('.pga'); if (ga) ga.textContent = (a + 1) + '～' + i;
+      made.push(pg);
+    }
+  }
+  made.forEach((pg, j) => { pg.querySelector('.pgn').textContent = '第 ' + (j + 1) + ' / ' + made.length + ' 页'; });
+  return made.length;
+}
+// 页码范围：一共 n 页，前 nd 页是题纸（默写纸）。日文表 nd＝0。打印页里也原样用它
+function prtRange(n, nd) {
+  const r = (a, b) => a === b ? '第 ' + a + ' 页' : '第 ' + a + '～' + b + ' 页';
+  return nd > 0 && nd < n ? '共 ' + n + ' 页：题纸' + r(1, nd) + '，答案' + r(nd + 1, n) : '共 ' + n + ' 页';
+}
+// 等字体（最多等 ms 毫秒）：先放一点要用到的字（让浏览器开始下载字体），等好了再排版（字体换了，每行的高度会变）
+async function prtFonts(doc, root, ms) {
+  try {
+    const s = doc.createElement('div'); s.className = 'pg'; s.style.cssText = 'position:absolute;left:-9999px;top:0;height:auto;visibility:hidden';
+    s.innerHTML = '<span class="pj">漢字かな</span><span class="pk">かな</span><span class="pex">例文</span>中文'; (root || doc.body).appendChild(s);
+    void s.offsetHeight;
+    if (doc.fonts && doc.fonts.ready) await Promise.race([doc.fonts.ready, new Promise(ok => setTimeout(ok, ms))]);
+    s.remove();
+  } catch (e) {}
+}
+// 默写纸上的例句：这个词（«» 标的那一段）挖空
+const prtBlank = s => rb(String(s || '').replace(/«[^«»]*»/g, '\u0001')).replace(/\u0001/g, '<span class="pblank">（　　　）</span>');
+// 排版要用的东西（打印页只拿到这些文字，没有钥匙）：打乱只在这里做一次，默写纸和答案页同一个顺序
+function prtModel(info, words, o) {
+  const list = words.slice();
+  if (o.shuf) for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
+  const day = tokyoToday(), rows = {};
+  const kinds = o.kind === 'dict' ? [['dict', '默写纸'], ['ans', '答案']] : [['tbl', '日文表']];
+  const row = (k, x, n) => {
+    const e = o.ex ? prtEx(x) : null, kana = x.w === x.r, mean = '<div class="pm">' + esc(x.m) + (x.p ? '<span class="pp">' + esc(x.p) + '</span>' : '') + '</div>';
+    if (k === 'dict') return '<div class="pr"><div class="pn">' + n + '</div><div class="pc">' + mean + (e ? '<div class="pex" lang="ja">' + prtBlank(e[0]) + '</div><div class="pz">' + esc(e[1]) + '</div>' : '') + '</div>' +
+      '<div class="pc pw">' + (kana ? '<span class="pna">（只写读音）</span>' : '') + '</div><div class="pc pw"></div></div>';
+    const exl = e ? '<div class="px"><span class="pex" lang="ja">' + rb(e[0]) + '</span><span class="pz">' + esc(e[1]) + '</span></div>' : '';
+    const pr = '<div class="pr' + (e ? ' pr2' : '') + '"><div class="pn">' + n + '</div>';   // pr2：下面还有一行例句
+    if (k === 'ans') return pr + '<div class="pc">' + mean + '</div><div class="pc pj" lang="ja">' + esc(x.w) + '</div><div class="pc pk" lang="ja">' + esc(x.r) + '</div>' + exl + '</div>';
+    return pr + '<div class="pc pj" lang="ja">' + esc(x.w) + '</div><div class="pc pk" lang="ja">' + (kana ? '—' : esc(x.r)) + '</div><div class="pc">' + mean + '</div>' + exl + '</div>';
+  };
+  for (const [k] of kinds) rows[k] = list.map((x, i) => row(k, x, i + 1));
+  return { kinds, rows, per: o.ex ? o.rowsEx : o.rows, total: list.length, title: info.title, who: info.who || '', when: day ? md(day) + '打印' : '', credit: prtCredit(), ex: !!o.ex };
+}
+// 打印前和服务器核对一次（学生端才有）：核对不了（断网等）也当不能印
+async function prtCheck(info) {
+  if (!info.check) return { ok: true };
+  try { const r = await info.check(); return r && r.ok ? { ok: true } : { ok: false, msg: (r && r.msg) || '现在不能打印' }; }
+  catch (e) { return { ok: false, msg: '没和服务器核对上（' + e.message + '），过一会儿再点' }; }
+}
+// 开着对话框、预览时离开这一页又回来：先遮住（hold），核对过再显示；核对不过就关掉（fail）。返回「不再管」的函数
+function prtGuard(info, hold, show, fail) {
+  if (!info.check) return () => {};
+  let away = false, seq = 0;
+  const back = async () => {
+    const my = ++seq; hold();
+    const r = await prtCheck(info);
+    if (my !== seq) return;
+    if (r.ok) show(); else fail(r.msg);
+  };
+  const vis = () => { if (document.visibilityState === 'hidden') away = true; else if (away) { away = false; back(); } };
+  const ps = e => { if (e.persisted) back(); };
+  document.addEventListener('visibilitychange', vis); window.addEventListener('pageshow', ps);
+  return () => { seq++; document.removeEventListener('visibilitychange', vis); window.removeEventListener('pageshow', ps); };
+}
+// 打印选项对话框：选好以后点「打印预览」
+function printDialog(info) {
+  if (document.getElementById('prt')) return;   // 预览已经开着
+  document.querySelectorAll('.modal.prtd').forEach(x => x.close ? x.close() : x.remove());
+  const all = (info.words || []).filter(x => x && x.w), words = all.slice(0, PRT_MAX);
+  if (!words.length) { toast('这里没有可以打印的词'); return; }
+  const exOk = !!info.exOk && words.some(prtEx), o = prtGet();
+  const segRows = () => (o.ex && exOk ? PRT_ROWS_EX : PRT_ROWS).map(n => '<button type="button" data-prow="' + n + '" aria-pressed="' + ((o.ex && exOk ? o.rowsEx : o.rows) === n) + '">' + n + '</button>').join('');
+  let unguard = () => {};
+  const m = modal('<h2>打印：' + esc(info.title) + '</h2>' +
+    '<div class="muted">' + (info.who ? esc(info.who) + ' · ' : '') + '一共 ' + words.length + ' 个词' + (all.length > words.length ? '（一次最多 ' + PRT_MAX + ' 个，只印前 ' + PRT_MAX + ' 个）' : '') + (info.note ? '。' + esc(info.note) : '') + '。只是打印，不算学习记录。</div>' +
+    '<div class="prf"><span class="lab">版式</span><div class="seg" role="group" aria-label="版式"><button type="button" data-pkind="dict" aria-pressed="' + (o.kind === 'dict') + '">默写纸＋答案页</button><button type="button" data-pkind="tbl" aria-pressed="' + (o.kind === 'tbl') + '">日文表</button></div></div>' +
+    '<div class="small muted" id="prkd"></div>' +
+    '<div class="prf"><span class="lab">每页最多</span><div class="seg" role="group" aria-label="每页最多几行" id="prows">' + segRows() + '</div><span class="small muted">行</span></div>' +
+    '<div class="checks"><button type="button" class="ck" data-pshuf aria-pressed="' + o.shuf + '">打乱顺序</button>' +
+    '<button type="button" class="ck" data-pex aria-pressed="' + (o.ex && exOk) + '"' + (exOk ? '' : ' disabled') + '>带例句</button></div>' +
+    '<div class="small muted">' + (exOk ? '带例句：每个词印第 1 个例句（默写纸上把这个词挖空）。字多的行比较高，那一页就少放几行。' : esc(info.exWhy || '这一份没有例句可以印。')) + '</div>' +
+    '<div class="small muted">点「打印预览」看一下，再点「打印」（会另开一页来打印，纸上不会印出你的专属链接；手机上也可以选「存成 PDF」）。' + (info.check ? '另开的打印页只能印一次（印完或取消就清掉），要再印回这里再点「打印」。' : '') + '在微信里打不开打印的话，先点右上角用浏览器打开。</div>' +
+    '<div class="row"><button type="button" class="btn" data-close>取消</button><button type="button" class="btn main" data-pgo>打印预览</button></div>', { onClose: () => unguard() });
+  m.classList.add('prtd');
+  const kd = () => { const el = m.querySelector('#prkd'); if (el) el.textContent = o.kind === 'dict' ? '默写纸：只印中文（和词性），写法、读音两栏空着；后面自动附答案页（答案单独成页，可以不打那几页）。' : '日文表：写法、读音、中文都印出来，可以当词单看。'; };
+  kd();
+  const go = m.querySelector('[data-pgo]');
+  let checking = false;
+  // 离开这一页又回来：先把「打印预览」灰掉，核对过再放开；核对不过就关掉对话框
+  unguard = prtGuard(info, () => { checking = true; go.disabled = true; }, () => { checking = false; go.disabled = false; }, msg => { m.close(); toast(msg); if (info.onBlock) info.onBlock(); });
+  m.addEventListener('click', async e => {
+    const b = e.target.closest('button'); if (!b || b.disabled) return;
+    if (b.dataset.pkind) { o.kind = b.dataset.pkind; m.querySelectorAll('[data-pkind]').forEach(x => x.setAttribute('aria-pressed', String(x === b))); kd(); return; }
+    if (b.dataset.prow) { if (o.ex && exOk) o.rowsEx = +b.dataset.prow; else o.rows = +b.dataset.prow; m.querySelector('#prows').innerHTML = segRows(); return; }
+    if (b.hasAttribute('data-pshuf')) { o.shuf = !o.shuf; b.setAttribute('aria-pressed', String(o.shuf)); return; }
+    if (b.hasAttribute('data-pex')) { o.ex = !o.ex; b.setAttribute('aria-pressed', String(o.ex)); m.querySelector('#prows').innerHTML = segRows(); return; }
+    if (b.hasAttribute('data-pgo')) {
+      if (checking) return;
+      checking = true; go.disabled = true;
+      const r = await prtCheck(info);   // 学生端：真的要看到答案以前和服务器核对一次
+      checking = false;
+      if (!m.isConnected) return;
+      if (!r.ok) { m.close(); toast(r.msg); if (info.onBlock) info.onBlock(); return; }
+      prtPut(o); m.close(); printPreview(info, words, Object.assign({}, o, { ex: o.ex && exOk }));
+    }
+  });
+}
+// 打印页（另开的空白页，地址一直是 about:blank）：自己的样式、自己排版，好了自动打印一次；上面一条写页码范围、「打印」「关闭」（打印时不印）。
+// 不用 document.write／document.open：它们会把新页的地址改成本页的地址（带着钥匙，浏览器印页眉页脚时会印出来）；这里只往空白页里放元素、放一段脚本。
+// M.once（学生端）：只印一次——系统打印结束或取消（afterprint）就清掉纸面；页面上的「打印」按钮只能点一次
+//   （给自动打印没弹出来的浏览器）；离开这一页再回来也清掉。要再印，回原来的页面点「打印」（会再核对一次）。管理端（不是 once）都不清
+const prtJson = v => JSON.stringify(v).replace(/</g, '\\u003c').split(String.fromCharCode(0x2028)).join('\\u2028').split(String.fromCharCode(0x2029)).join('\\u2029');   // 放进 <script> 里也安全
+const PRT_PAGE_CSS = 'html,body{margin:0;background:#5B6270}body{font-family:sans-serif}.bar{position:sticky;top:0;z-index:2;display:flex;gap:8px;align-items:center;padding:8px 12px;background:#fff;border-bottom:1px solid #ccc;font-size:14px;color:#222}' +
+  '.bar button{font:inherit;padding:8px 14px;border-radius:10px;border:1px solid #ccc;background:#fff;cursor:pointer}.bar .go{background:#2C4A7A;color:#fff;border-color:transparent}.bar .go:disabled{opacity:.5}.bar span{flex:1}' +
+  '#pages{padding:calc(12mm + 8px) 0;display:flex;flex-direction:column;align-items:center;gap:calc(24mm + 12px)}#pages .pg{box-shadow:0 0 0 12mm #fff,0 1px 6px 12mm rgba(0,0,0,.3)}' +
+  '.wait{color:#fff;padding:24px;font-size:15px}.gone{background:#fff;padding:24px;font-size:15px;line-height:1.7}' +
+  '@media print{@page{size:A4 portrait;margin:11mm 12mm}html,body{background:#fff}.bar,.wait{display:none!important}#pages{padding:0;gap:0;display:block}#pages .pg{box-shadow:none;break-after:page;page-break-after:always}#pages .pg:last-child{break-after:auto;page-break-after:auto}}';
+// 往空白页里放东西：head（不带来源网址、标题、手机宽度、字体、样式）、body（上面一条、排版的地方），最后放一段脚本（在那一页里排版、打印）。M 为空时只放一句「正在准备打印」
+function prtWrite(w, M) {
+  const d = w.document, root = d.documentElement || d.appendChild(d.createElement('html'));
+  const head = d.head || root.insertBefore(d.createElement('head'), root.firstChild), body = d.body || root.appendChild(d.createElement('body'));
+  root.lang = 'zh-CN'; root.setAttribute('data-prt', '1'); head.innerHTML = ''; d.title = M ? M.title : '正在准备打印';
+  const add = (tag, at) => { const e = d.createElement(tag); Object.keys(at).forEach(k => e.setAttribute(k, at[k])); head.appendChild(e); return e; };
+  add('meta', { name: 'referrer', content: 'no-referrer' });   // 在加载字体以前：请求字体时不带来源网址
+  add('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' });
+  if (!M) { body.innerHTML = '<p style="font:16px sans-serif;padding:24px">正在准备打印……</p>'; return; }
+  add('link', { rel: 'stylesheet', href: PRT_FONT_URL, referrerpolicy: 'no-referrer' });
+  add('style', {}).textContent = PRT_CSS + PRT_PAGE_CSS;
+  body.innerHTML = '<div class="bar"><span id="rng">打印用的页面（打印完可以关掉）</span><button type="button" class="go" id="go" disabled>打印</button><button type="button" id="cl">关闭</button></div><div class="wait" id="wait">正在排版……</div><div id="pages"></div>';
+  const sc = d.createElement('script');
+  sc.textContent = '(function () {' +
+    'var M = ' + prtJson(M) + ';var paginate = ' + prtPaginate.toString() + ';var fonts = ' + prtFonts.toString() + ';var range = ' + prtRange.toString() + ';' +
+    'var go = document.getElementById("go"), away = false, done = false, inPrint = false, clicked = false;' +
+    // 清掉纸面（学生端：印过一次、离开又回来）：以后这一页印不出词了
+    'function wipe() { if (done) return; done = true; window.__prtDone = true; document.body.innerHTML = "<div class=\\"gone\\">这一页已经印过（或者离开过），纸面已经清掉。要再打印，请回原来的页面再点一次「打印」。<br><button type=\\"button\\" onclick=\\"window.close()\\">关闭这一页</button></div>"; }' +
+    'function ended() { if (inPrint) { inPrint = false; if (M.once) wipe(); } }' +
+    'window.addEventListener("beforeprint", function () { inPrint = true; });' +
+    'window.addEventListener("afterprint", ended);' +
+    'document.getElementById("cl").onclick = function () { window.close(); };' +
+    'go.onclick = function () { if (done || (M.once && clicked)) return; if (M.once) { clicked = true; go.disabled = true; go.textContent = "已经点过打印"; } try { window.print(); } catch (e) {} };' +
+    'document.addEventListener("visibilitychange", function () { if (!M.once) return; if (document.visibilityState === "hidden") away = true; else if (away) wipe(); });' +
+    'function lay() { var pg = document.getElementById("pages"); if (!pg || done) return; var n = paginate(document, pg, M); window.prtPages = n; var rg = document.getElementById("rng"); if (rg) rg.textContent = range(n, pg.querySelectorAll(".pg-dict").length) + (M.once ? "（学生打印页只能印一次）" : ""); }' +
+    'fonts(document, document.getElementById("pages"), 3000).then(function () { if (done) return; lay(); var wt = document.getElementById("wait"); if (wt) wt.remove(); go.disabled = false; window.prtReady = true; setTimeout(function () { if (!done) try { window.print(); } catch (e) {} }, 60);' +
+    ' if (document.fonts && document.fonts.status !== "loaded") document.fonts.ready.then(lay); });' +   // 字体后来才到：重新排一次
+    '})();';
+  body.appendChild(sc);
+}
+// 等打印页换成新的空白页（最多等 ms 毫秒；没换成也接着用原来那一页，见下面 0.5 秒的补放）
+async function prtFresh(w, d0, ms) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    try { if (w.closed) return; const d = w.document; if (d && d !== d0 && d.readyState === 'complete') return; } catch (e) {}
+    await new Promise(ok => setTimeout(ok, 30));
+  }
+}
+// 本页上的打印预览：盖住整个页面（手机上按宽度缩小显示），上面一条「返回」「打印」
+async function printPreview(info, words, o) {
+  if (document.getElementById('prt')) return;
+  const back = document.activeElement, M = Object.assign(prtModel(info, words, o), { once: !!info.check });   // 学生端（要核对的）打印页只印一次
+  const ov = document.createElement('div');
+  ov.id = 'prt'; ov.className = 'modal prtv'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', '打印预览');
+  ov.innerHTML = '<div class="prtbar"><button type="button" class="btn" data-pclose>返回</button><div class="prtinfo"><b>打印预览</b> <span id="prtn">正在排版……</span><small>A4 竖着打；点「打印」会另开一页来打印，纸上不会印出你的专属链接</small></div><button type="button" class="btn main" data-pprint disabled>打印</button></div>' +
+    '<div class="prthold" hidden>正在核对……</div><div class="prtwrap"><div class="prtsz"><div class="prtpages"></div></div></div>';
+  document.body.appendChild(ov);
+  document.documentElement.classList.add('prt-on');
+  const pp = ov.querySelector('.prtpages'), pb = ov.querySelector('[data-pprint]');
+  const fit = () => {
+    const wrap = ov.querySelector('.prtwrap'), sz = ov.querySelector('.prtsz'); if (!wrap || !pp.firstElementChild) return;
+    const pw = pp.offsetWidth, ph = pp.offsetHeight, s = Math.min(1, Math.max(0.2, (wrap.clientWidth - 16) / (pw || 1)));
+    pp.style.transform = 'scale(' + s + ')'; sz.style.width = Math.floor(pw * s) + 'px'; sz.style.height = Math.ceil(ph * s) + 'px';
+  };
+  let holding = false, printing = false;
+  const close = () => { if (!ov.isConnected) return; unguard(); window.removeEventListener('resize', fit); ov.remove(); document.documentElement.classList.remove('prt-on'); if (back && back.isConnected && back.focus) try { back.focus(); } catch (e) {} };
+  const hold = on => { holding = on; ov.classList.toggle('hold', on); ov.querySelector('.prthold').hidden = !on; pb.disabled = on || !pp.firstElementChild; };
+  const unguard = prtGuard(info, () => hold(true), () => hold(false), msg => { close(); toast(msg); if (info.onBlock) info.onBlock(); });
+  ov.addEventListener('click', async e => {
+    if (e.target.closest('[data-pclose]')) { close(); return; }
+    if (!e.target.closest('[data-pprint]') || pb.disabled || holding || printing) return;
+    // 先在这一下点击里开好新的一页（不然会被当成弹窗挡掉），再核对、再把纸面写进去
+    let w = null; try { w = window.open('', '_blank'); } catch (er) { w = null; }
+    if (!w) { toast('浏览器没让打开打印用的新页面：请允许这个网站弹出窗口，或者换 Safari、Chrome 打开链接再打印', 6000); return; }
+    try { w.opener = null; } catch (er) {}   // 马上断开：打印页碰不到本页（本页的地址里有钥匙）
+    let d0 = null; try { d0 = w.document; prtWrite(w, null); } catch (er) {}
+    try { w.location.replace('about:blank'); } catch (er) {}   // 换成一个新的空白页：没有来源网址（document.referrer 是空的）
+    printing = true; pb.disabled = true;
+    const [r] = await Promise.all([prtCheck(info), prtFresh(w, d0, 2000)]);
+    printing = false; pb.disabled = holding;
+    if (!r.ok) { try { w.close(); } catch (er) {} close(); toast(r.msg); if (info.onBlock) info.onBlock(); return; }
+    try {
+      prtWrite(w, M); try { w.focus(); } catch (er) {}
+      // 个别浏览器开好新页以后会把空白页整个换成一个新的空白文档：只在确实换掉了（不是刚才放过东西的那个文档、上面没有记号）、而且还没印过、没清过时补放一次
+      const d0 = w.document;
+      setTimeout(() => { try { if (w.closed || w.__prtDone) return; const d = w.document; if (d === d0 || (d.documentElement && d.documentElement.hasAttribute('data-prt'))) return; prtWrite(w, M); } catch (er) {} }, 500);
+    } catch (er) { try { w.close(); } catch (e2) {} toast('打印用的页面没打开成功，请再点一次「打印」'); }
+  });
+  ov.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+  window.addEventListener('resize', fit);
+  setTimeout(() => { if (ov.isConnected) try { pb.focus({ preventScroll: true }); } catch (e) {} }, 30);
+  await prtFonts(document, ov, 2500);
+  if (!ov.isConnected) return;
+  const lay = () => { const n = prtPaginate(document, pp, M); ov.querySelector('#prtn').textContent = prtRange(n, pp.querySelectorAll('.pg-dict').length); fit(); };   // 题纸第几页到第几页、答案第几页到第几页（字体重排以后也跟着改）
+  lay(); pb.disabled = holding; setTimeout(fit, 120);
+  if (document.fonts && document.fonts.status !== 'loaded') document.fonts.ready.then(() => { if (ov.isConnected) lay(); });   // 字体后来才到：每行高度会变，重新排一次
+}
 
 async function boot() {
   const app = $('app');
