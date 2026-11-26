@@ -216,8 +216,8 @@ const Stu = (() => {
     const w = D.week, L = w.kind === 'L', tot = cards().length, done = doneN(), en = errN();
     const tabs = [['study', '学习'], ['test', '测验'], ...(drillOn() || tab === 'drill' ? [['drill', '刷题']] : []), ['err', '错词本'], ['map', '进度']];
     return '<header class="top"><div class="wrap">' +
-      '<div class="row"><div class="brand"><b>' + esc(D.me.name) + '</b><span>第 ' + w.no + ' 周 · ' + (L ? '学新词' : '回顾周') + ' · ' + md(w.start) + '～' + md(w.end) + (w.extended ? '（已延长）' : '') + '</span></div>' + (D.stats ? '<span class="chip' + (D.stats.streak ? ' ok' : '') + '">连续 ' + D.stats.streak + ' 天</span>' : '') + '</div>' +
-      '<div class="seg" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k || (k === 'map' && (tab === 'words' || tab === 'listen' || tab === 'flash'))) + '">' + n + (k === 'err' && en ? ' ' + en : '') + '</button>').join('') + '</div>' +   // 全部词表、随身听、快刷在「进度」里面
+      '<div class="row"><div class="brand"><span class="brand-mark" aria-hidden="true">言</span><div class="brand-txt"><b>' + esc(D.me.name) + '</b><span>第 ' + w.no + ' 周 · ' + (L ? '学新词' : '回顾周') + ' · ' + md(w.start) + '～' + md(w.end) + (w.extended ? '（已延长）' : '') + '</span></div></div><div class="hdr-right">' + (D.stats ? '<span class="chip' + (D.stats.streak ? ' ok' : '') + '">连续 ' + D.stats.streak + ' 天</span>' : '') + themeBarHTML() + '</div></div>' +
+      '<div class="seg nav-main" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k || (k === 'map' && (tab === 'words' || tab === 'listen' || tab === 'flash'))) + '">' + navIcon(k) + n + (k === 'err' && en ? ' ' + en : '') + '</button>').join('') + '</div>' +   // 全部词表、随身听、快刷在「进度」里面
       (L && tot && tab === 'study' && mode !== 'rev' && !w.waiting ? '<div class="prog"><span>本周练过 ' + done + ' / ' + tot + '</span><div class="track"><div class="fill" style="width:' + (done / tot * 100) + '%"></div></div></div>' : '') +
       '</div></header>';
   }
@@ -476,15 +476,15 @@ const Stu = (() => {
     if (!c) { resetQueue(); return '<div class="box"><h2>这张卡找不到了</h2><div><button class="btn" data-act="reload">重新读取</button></div></div>'; }
     if (!flipped) {
       const left = mode === 'rev' ? '今天的复习还剩 ' + queue.length + ' 个' : mode === 'round' ? '本轮复习还剩 ' + queue.length + ' 个' : mode === 'all' ? '这一遍还剩 ' + queue.length + ' 个' : '本周还剩 ' + todo().length + ' 个没练完';
-      return '<div class="card front" id="front" tabindex="0" role="button" aria-label="翻面看答案"><div class="chips"><span class="chip">' + esc(c.lvl) + '</span>' +
+      return '<div class="card front" id="front" tabindex="0" role="button" aria-label="翻面看答案"><div class="chips"><span class="chip" data-lv="' + esc(c.lvl) + '">' + esc(c.lvl) + '</span>' +
         (tag ? '<span class="chip ok">' + tag + '</span>' : '') + (again.has(c.id) || c.again ? '<span class="chip bad">' + (mode === 'round' ? '再看一次' : '今天再练一次') + '</span>' : '') +
         (c.src === 'carry' ? '<span class="chip warn">上周错词</span>' : c.wrong > 0 ? '<span class="chip warn">错过的词</span>' : '') + '</div>' +
         '<div class="big" lang="ja">' + esc(c.w) + '</div><div class="hint">先想一想意思，再点一下翻面</div></div>' +
         '<div class="bar one"><button class="btn main" data-act="flip">翻面看答案 <span class="k">空格</span></button></div>' +
         '<div class="muted center">' + left + '</div>';
     }
-    return '<div class="card">' + cardBack(c) + '</div>' +
-      '<div class="bar"><button class="btn no" data-rate="no">不会 <span class="k">1</span></button><button class="btn" data-rate="mid">不太确定 <span class="k">2</span></button><button class="btn ok" data-rate="ok">会了 <span class="k">3</span></button></div>' +
+    return '<div class="card">' + cardBack(c, { chip: c.lvl ? '<span class="chip" data-lv="' + esc(c.lvl) + '">' + esc(c.lvl) + '</span>' : '' }) + '</div>' +
+      '<div class="bar"><button class="btn no" data-rate="no">不会 <span class="k">1</span></button><button class="btn mid" data-rate="mid">不太确定 <span class="k">2</span></button><button class="btn ok" data-rate="ok">会了 <span class="k">3</span></button></div>' +
       '<div class="muted small center">' + (mode === 'round' ? '「不会」「不太确定」的词，这次复习里还会再出现；复习本轮不算成绩，回顾测才算' : '「不会」「不太确定」的词，今天还会再出现') +
       (mode === 'rev' && c.chk ? '<br>抽查：「会了」下次间隔翻倍（达到上限后保持）；「不会」「不太确定」就回到每天复习，从第 1 次重新来' : '') + '</div>';   // 第 39 步
   }
@@ -803,7 +803,7 @@ const Stu = (() => {
   function badge(it) {
     if (!it || !it.lv || !LV.includes(it.lv) || !starOn()) return '';
     const s = Number.isInteger(it.st) && it.st >= 1 && it.st <= 5 ? it.st : 0;
-    return '<div class="qlv"><span class="lvb">' + esc(it.lv) + '</span>' + (s ? '<span class="stars" role="img" aria-label="难度 ' + s + ' 星（满 5 星，同一档里比）">' + '★'.repeat(s) + '<span class="off">' + '★'.repeat(5 - s) + '</span></span>' : '') + '</div>';
+    return '<div class="qlv"><span class="lvb" data-lv="' + esc(it.lv) + '">' + esc(it.lv) + '</span>' + (s ? '<span class="stars" role="img" aria-label="难度 ' + s + ' 星（满 5 星，同一档里比）">' + '★'.repeat(s) + '<span class="off">' + '★'.repeat(5 - s) + '</span></span>' : '') + '</div>';
   }
   function qBody(it, sel, rs, lock) {
     return badge(it) + '<div class="muted">' + qText(it) + '</div>' + stemHTML(it) +
@@ -1298,7 +1298,7 @@ const Stu = (() => {
   }
   const stChip = s => ({ week: '<span class="chip">本周在学</span>', rev: '<span class="chip wst">复习中</span>', done: '<span class="chip ok">已掌握</span>', new: '<span class="chip wst">没学过</span>' }[s] || '');
   function wlRow(x) {
-    return '<div class="wrow"><div class="wr1">' + wlCell(x.id, 'w', x.w) + (x.r && x.r !== x.w ? wlCell(x.id, 'r', x.r) : '') +    /* 写法就是假名的词不另写读音 */'<span class="wtags"><span class="chip wst">' + esc(x.lvl) + '</span>' + stChip(x.s) +
+    return '<div class="wrow"><div class="wr1">' + wlCell(x.id, 'w', x.w) + (x.r && x.r !== x.w ? wlCell(x.id, 'r', x.r) : '') +    /* 写法就是假名的词不另写读音 */'<span class="wtags"><span class="chip wst" data-lv="' + esc(x.lvl) + '">' + esc(x.lvl) + '</span>' + stChip(x.s) +
       (num(x.e) ? '<span class="chip warn">错 ' + num(x.e) + ' 次</span>' : '') + (x.off ? '<span class="chip">已停用</span>' : '') + '</span></div>' +
       '<div class="wr2">' + wlCell(x.id, 'm', x.m) + '<button type="button" class="gbtn wcard" data-wcard="' + esc(x.id) + '">看卡</button></div></div>';
   }
@@ -1689,8 +1689,9 @@ const Stu = (() => {
   });
   const lsNowTxt = () => { const s = LQ.now; if (LQ.done) return '播完了'; if (!s) return LQ.playing ? '' : '已暂停'; const c = lsCfg(); return (LQ.playing ? '正在播：' : '停在：') + (s.p ? '例句 ' + s.p : '单词') + (c.rep > 1 ? '（第 ' + (s.k + 1) + ' / ' + c.rep + ' 遍）' : ''); };
   function lsNowHTML() {
-    const w = LQ.list[LQ.i], c = lsCfg(), n = LQ.list.length, s = LQ.now, ex = s && s.p && w.ex[s.p - 1];
-    let h = '<div class="card lsnow" id="lsnow"><div class="row"><span class="chip">' + esc(w.lvl || '') + '</span><span class="small muted" role="status">第 ' + (LQ.i + 1) + ' / ' + n + ' 个 · ' + esc(lsNowTxt()) + '</span></div>' +
+    const w = LQ.list[LQ.i], c = lsCfg(), n = LQ.list.length, s = LQ.now, ex = s && s.p && w.ex[s.p - 1], hasEx = c.ex && (w.ex.length || w.nex);
+    let h = '<div class="card lsnow" id="lsnow"><div class="row"><span class="chip" data-lv="' + esc(w.lvl || '') + '">' + esc(w.lvl || '') + '</span><span class="small muted" role="status">第 ' + (LQ.i + 1) + ' / ' + n + ' 个 · ' + esc(lsNowTxt()) + '</span></div>' +
+      (hasEx ? '<div class="ls-stages" aria-hidden="true"><i class="' + (s && !s.p ? 'on' : '') + '">单词</i><i class="' + (s && s.p === 1 ? 'on' : '') + '">例句 1</i><i class="' + (s && s.p === 2 ? 'on' : '') + '">例句 2</i></div>' : '') +
       '<div class="lsw"><span class="big" lang="ja">' + esc(w.w) + '</span>' + (w.r && w.r !== w.w ? '<span class="r" lang="ja">' + esc(w.r) + '</span>' : '') + (w.off ? '<span class="chip">已停用</span>' : '') + '</div>' +
       (c.hideM && !LQ.showM ? '<button type="button" class="wmask lsm" data-act="lsshowm" aria-label="点一下看中文">中文遮住了，点一下看</button>' : '<div class="mean lsm">' + esc(w.m) + '</div>');
     if (ex) h += '<div class="lsex"><div class="jp" lang="ja">' + rb(ex[0]) + '</div>' + (c.hideM && !LQ.showM ? '' : '<div class="zh">' + esc(ex[1]) + '</div>') + '</div>';
@@ -1769,7 +1770,7 @@ const Stu = (() => {
         '<div class="form">' + (b ? '<button type="button" class="btn main" data-act="qfbad">只刷标了「不会」的（' + b + ' 个）</button>' : '') + '<button type="button" class="btn' + (b ? '' : ' main') + '" data-act="qfagain">从头再刷</button><button type="button" class="btn" data-act="lqback">返回</button></div></div>' + note;
     }
     const w = LQ.list[LQ.i], m = mk[w.id];
-    const chips = '<div class="chips"><span class="chip">' + esc(w.lvl || '') + '</span>' + (m === 'k' ? '<span class="chip ok">会</span>' : m === 'n' ? '<span class="chip bad">不会</span>' : '') + (w.off ? '<span class="chip">已停用</span>' : '') + '</div>';
+    const chips = '<div class="chips"><span class="chip" data-lv="' + esc(w.lvl || '') + '">' + esc(w.lvl || '') + '</span>' + (m === 'k' ? '<span class="chip ok">会</span>' : m === 'n' ? '<span class="chip bad">不会</span>' : '') + (w.off ? '<span class="chip">已停用</span>' : '') + '</div>';
     const face = !LQ.flip
       ? (c.front === 'm' ? '<div class="qfm">' + esc(w.m) + '</div>' : '<div class="big" lang="ja">' + esc(w.w) + '</div>') + '<div class="hint">点一下翻面 · 左右滑换词</div>'
       : '<div class="head qfh"><span class="w" lang="ja">' + esc(w.w) + '</span>' + (w.r && w.r !== w.w ? '<span class="r" lang="ja">' + esc(w.r) + '</span>' : '') + sayBtn(aud(w.id), '听单词发音') + slowBtn(aud(w.id), '慢速听单词') + '</div><div class="mean">' + esc(w.m) + '</div><div class="hint">再点一下翻回去 · 左右滑换词</div>';
@@ -1955,13 +1956,15 @@ const Stu = (() => {
   }
 
   // ── 错词本 ──
+  let errCompact = false;
   function errHTML() {
     if (!D.errbook.length) return '<div class="box"><h2>错词本是空的</h2><div class="muted">测验答错的词会放到这里。</div></div>';
     let h = has37() ? esFilter() : '';
     const list = D.errbook.filter(esPass);
     h += '<div class="row errtop"><span class="muted">一共 ' + D.errbook.length + ' 个' + (list.length < D.errbook.length ? '，筛出来 ' + list.length + ' 个' : '') + '，最近一周错的排在前面。</span>' +
-      (list.some(prOk) ? '<button type="button" class="gbtn" data-act="prerr">打印' + (list.length < D.errbook.length ? '筛出来的' : '') + '</button>' : '') + '</div>';   // 第 40 步：打印（停用的不印）
-    return h + list.map(c => '<div class="card">' + cardBack(c, { chip: '<span class="chip warn">错过 ' + num(c.wrong) + ' 次</span>' + (c.st === 'correct' ? ' <span class="chip ok">后来答对了</span>' : '') + (c.pok ? ' <span class="chip ok">练习答对过</span>' : '') + (c.off ? ' <span class="chip">已停用</span>' : '') }).replace('</div>', '</div>' + esLine(c)) + '</div>').join('');   // 错在哪：放在词的下面一行
+      '<span class="copyrow"><button type="button" class="gbtn" data-act="errview" aria-pressed="' + errCompact + '">' + (errCompact ? '完整卡片' : '紧凑列表') + '</button>' +
+      (list.some(prOk) ? '<button type="button" class="gbtn" data-act="prerr">打印' + (list.length < D.errbook.length ? '筛出来的' : '') + '</button>' : '') + '</span></div>';   // 第 40 步：打印（停用的不印）
+    return h + list.map(c => '<div class="card' + (errCompact ? ' err-compact' : '') + '">' + cardBack(c, { chip: (c.lvl ? '<span class="chip" data-lv="' + esc(c.lvl) + '">' + esc(c.lvl) + '</span> ' : '') + '<span class="chip warn">错过 ' + num(c.wrong) + ' 次</span>' + (c.st === 'correct' ? ' <span class="chip ok">后来答对了</span>' : '') + (c.pok ? ' <span class="chip ok">练习答对过</span>' : '') + (c.off ? ' <span class="chip">已停用</span>' : '') }).replace('</div>', '</div>' + esLine(c)) + '</div>').join('');   // 错在哪：放在词的下面一行
   }
 
   // ── 拼图地图 ──
@@ -2033,10 +2036,12 @@ const Stu = (() => {
   // 候选方案：上面写的是换过去后这个学生实际的学法（默认＋方案＋他自己单独的设置）；老师给他单独调过、和方案本来的说法不一样时，写明方案本来是什么
   const ownNote = x => x.mine && lvText(x.mine) !== lvText(x.lv) ? '<div class="sub ownl">老师给你单独调过学法，上面是换过去后你实际的学法；这个方案本来是：' + esc(lvText(x.lv)) + '</div>' : '';
 
+  const FUJI_STAGE = { N5: '第一阶 · 河口湖山麓', N4: '第二阶 · 浅间鸟居', N3: '第三阶 · 云海五合目', N2: '第四阶 · 星野八合目', N1: '第五阶 · 富士雪顶' };
   function mapHTML() {
     const c = D.cfg, si = LV.indexOf(c.start), s = D.stats || { streak: 0, learned: 0, correct: 0, passed: 0, days: 0, last30: [] };
     const skipped = l => c.mode === 'only' ? !(c.only || []).includes(l) : c.mode === 'step' ? LV.indexOf(l) < si : false;
-    let h = wlEntry() + lqEntry() + prEntry() + '<div class="box"><h2>我的进度</h2><div class="stats">' +   // 第 40 步：打印词单
+    const tools = [wlEntry(), lqEntry(), prEntry()].filter(Boolean).join('');
+    let h = (tools ? '<div class="map-tools">' + tools + '</div>' : '') + '<div class="box"><h2>我的进度</h2><div class="stats">' +   // 第 40 步：打印词单
       '<div class="stat"><b>' + num(s.streak) + ' 天</b><span>连续打卡</span></div><div class="stat"><b>' + num(s.learned) + '</b><span>学过的词（累计）</span></div><div class="stat"><b>' + num(s.correct) + '</b><span>现在全亮的词</span></div></div>';
     const on = new Set(s.last30 || []);
     let cal = ''; for (let i = 29; i >= 0; i--) { const k = addDays(D.week.today, -i), [, mm, dd] = k.split('-'); cal += '<i' + (on.has(k) ? ' class="f"' : '') + ' title="' + (+mm) + '月' + (+dd) + '日"></i>'; }
@@ -2048,13 +2053,16 @@ const Stu = (() => {
       h += '<div class="box"><h2>' + esc(D.me.grp) + ' <small>同班同学，按名字排</small></h2><div class="list">' + D.class.map(m =>
         '<div class="it"><span class="nm">' + esc(m.name) + (m.me ? ' <span class="chip">我</span>' : '') + '</span><span class="sub">' + (m.today ? '<span class="chip ok">今天学了</span> ' : '') + '连续 ' + num(m.streak) + ' 天 · 本周练过 ' + num(m.week) + ' 个</span></div>').join('') + '</div></div>';
     }
-    h += '<div class="muted">词库地图：学过的词先半亮，测验答对了全亮。</div>';
+    h += '<div class="muted">富士山五阶词库地图：从 N5 山麓到 N1 雪顶，学过的词先半亮，测验答对了全亮。</div>';
     for (const l of LV) {
-      const m = D.map[l];
-      if (!m) { h += '<div class="box"><h2>' + l + ' <small>还没有放进词库</small></h2></div>'; continue; }
-      const half = new Set(m.half), full = new Set(m.full), sk = skipped(l);
+      const m = D.map[l], stg = FUJI_STAGE[l] || '';
+      if (!m) { h += '<div class="box fuji-box" data-stage="' + esc(stg) + '"><h2><span class="chip" data-lv="' + l + '">' + l + '</span> <small>还没有放进词库</small></h2></div>'; continue; }
+      const half = new Set(m.half), full = new Set(m.full), sk = skipped(l), tot = Math.max(1, num(m.total));
+      const pf = sk ? 100 : (full.size * 100 / tot).toFixed(1), ph = sk ? 0 : (half.size * 100 / tot).toFixed(1);
       let cells = ''; for (let i = 1; i <= m.total; i++) cells += '<i' + (full.has(i) ? ' class="f"' : half.has(i) ? ' class="h"' : '') + '></i>';
-      h += '<div class="box"><h2>' + l + ' <small>' + (sk ? '已掌握（不用学）' : '全亮 ' + full.size + ' · 半亮 ' + half.size + ' · 共 ' + num(m.total)) + '</small></h2><div class="map' + (sk ? ' done' : '') + '" aria-label="' + l + ' 共 ' + num(m.total) + ' 个词，全亮 ' + full.size + ' 个">' + cells + '</div></div>';
+      h += '<div class="box fuji-box" data-stage="' + esc(stg) + '"><h2><span class="chip" data-lv="' + l + '">' + l + '</span> <small>' + (sk ? '已掌握（不用学）' : '全亮 ' + full.size + ' · 半亮 ' + half.size + ' · 共 ' + num(m.total)) + '</small></h2>' +
+        '<div class="lv-bar" aria-hidden="true"><i class="bf" style="width:' + pf + '%"></i><i class="bh" style="width:' + ph + '%"></i></div>' +
+        '<div class="map' + (sk ? ' done' : '') + '" aria-label="' + l + ' 共 ' + num(m.total) + ' 个词，全亮 ' + full.size + ' 个">' + cells + '</div></div>';
     }
     return h;
   }
@@ -2165,6 +2173,7 @@ const Stu = (() => {
     if (act === 'qfbad') { if (LQ && LQ.kind === 'flash') { const mk = qfMarks(), L = LQ.list.filter(w => mk[w.id] === 'n'); if (L.length) { const o = LQ; lqOpen('flash', o.src, L, '标了「不会」的 ' + L.length + ' 个', o.from, o.sig + ':n'); } } return; }
     if (act === 'lqback') { lqBack(); return; }
     // 第 40 步：打印（只打开打印的对话框；不改学习记录）
+    if (act === 'errview') { errCompact = !errCompact; render(); return; }
     if (act === 'prgo') { if (tab === 'map' && !T && PRSRC) prOpen(PRSRC, a); return; }
     if (act === 'prweek') { if (!T) prOpen('week', a); return; }
     if (act === 'prerr') { if (tab === 'err' && !T) prOpen('errf', a); return; }

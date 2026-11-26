@@ -1,6 +1,7 @@
 // 单词学习系统 · 管理端：学生、设置面板（全局 → 方案 → 学生三层）、改动记录
 const Adm = (() => {
   let D = null, tab = 'stu', scope = 'global', tplKey = 'weak', stuKey = null, draft = null, savingCfg = false, copying = false;
+  let stuFilter = 'all', stuQ = '', cfgCat = 'all';
   let copied = null, copyAt = null;   // 刚复制好、方案列表还没读到的新方案（记着它：不会让老师再复制一份）；点复制时在看的是哪一层
   let typing = false;                 // 这一页画出来以后老师在设置里输入过（数字框打字时还没离开、草稿还没更新，也算正在改）
   let draftBase = null, draftVer = null, rebase = null, detailSeq = 0, deciding = false;   // 草稿开始编辑时的设置和版本号（两个窗口同时改时用来核对、合并）
@@ -85,9 +86,9 @@ const Adm = (() => {
   function render() {
     typing = false;
     const tabs = [['stu', '学生'], ['cfg', '设置'], ['ex', '拓展例句'], ['qs', '题目难度'], ['wd', '词库'], ['log', '改动记录']];   // 第 40 步：词库
-    let h = '<header class="top"><div class="wrap wide"><div class="row"><div class="brand"><b>单词系统 · 管理</b><span>' + esc(D.me) + '</span></div>' +
-      '<div class="seg" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-atab="' + k + '" aria-pressed="' + (tab === k) + '">' + n + '</button>').join('') + '</div></div>' +
-      (tab === 'cfg' ? scopeBar() : '') + '</div></header>';
+    let h = '<header class="top"><div class="wrap wide"><div class="row"><div class="brand"><span class="brand-mark" aria-hidden="true">管</span><div class="brand-txt"><b>单词系统 · 管理</b><span>' + esc(D.me) + '</span></div></div><div class="hdr-right">' + themeBarHTML() + '</div></div>' +
+      '<div class="seg nav-main" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-atab="' + k + '" aria-pressed="' + (tab === k) + '">' + navIcon(k) + n + '</button>').join('') + '</div>' +
+      (tab === 'cfg' ? '<div class="scope-wrap">' + scopeBar() + '</div>' : '') + '</div></header>';
     if (tab === 'stu') h += '<main class="wrap wide">' + stuHTML() + '</main>';
     else if (tab === 'log') h += '<main class="wrap wide">' + logHTML() + '</main>';
     else if (tab === 'ex') h += '<main class="wrap wide">' + exaHTML() + '</main>';
@@ -97,7 +98,7 @@ const Adm = (() => {
     $('app').innerHTML = h;
     if (tab === 'wd') wdBind();
     if (tab === 'cfg') {
-      buildSteps(); loadDraft();
+      buildSteps(); loadDraft(); applyCfgCat();
       // 方案多、名字长时顶上一排横着滑：把选中的那个滑到看得见的地方
       const bar = document.querySelector('.seg.scopes'), on = bar && bar.querySelector('[aria-pressed="true"]');
       if (on && (on.offsetLeft < bar.scrollLeft || on.offsetLeft + on.offsetWidth > bar.scrollLeft + bar.clientWidth)) bar.scrollLeft = Math.max(0, on.offsetLeft - 8);
@@ -105,22 +106,40 @@ const Adm = (() => {
   }
 
   // ── 学生 ──
+  function stuListHTML() {
+    const t = TPL(), rqs = new Set(D.reqs.map(r => r.sid)), q = stuQ.trim().toLowerCase();
+    const list = D.students.filter(s => {
+      if (stuFilter === 'attn' && !(failOpen(s) || rqs.has(s.id))) return false;
+      if (stuFilter === 'streak' && !(s.active && num(s.streak) > 0)) return false;
+      if (!q) return true;
+      return String(s.name || '').toLowerCase().includes(q) || String(s.grp || '').toLowerCase().includes(q) || String(t[s.plan] || s.plan || '').toLowerCase().includes(q);
+    });
+    if (!list.length) return '<div class="muted">没有符合筛选条件的学生。</div>';
+    return '<div class="list">' + list.map(s => {
+      const w = s.week, lt = s.last_test;
+      const wk = w ? '第 ' + num(w.no) + ' 周' + (w.kind === 'R' ? '（回顾）' : '') + (w.cur ? (w.kind === 'L' ? (num(w.n) ? ' · 本周练过 ' + num(w.done) + '/' + num(w.n) : ' · <span class="chip warn">这周没有词</span>') : '') : '（已到期，学生还没打开新的一周）') : md(s.start) + ' 开始';
+      const bar = w && w.cur && w.kind === 'L' && num(w.n) > 0 ? '<div class="stu-mini-track" aria-hidden="true"><div class="stu-mini-fill" style="width:' + Math.min(100, Math.round(num(w.done) * 100 / num(w.n))) + '%"></div></div>' : '';
+      return '<div class="it clickable" data-stu="' + esc(s.id) + '" role="button" tabindex="0"><div class="main"><div class="nm">' + esc(s.name) + (s.grp ? ' <span class="chip">' + esc(s.grp) + '</span>' : '') + (s.streak ? ' <span class="chip ok">连续 ' + num(s.streak) + ' 天</span>' : '') + (s.active ? '' : ' <span class="chip bad">已停用</span>') + (rqs.has(s.id) ? ' <span class="chip warn">申请中</span>' : '') + (failOpen(s) ? ' <span class="chip bad">没及格待处理</span>' : '') + '</div>' +
+        '<div class="sub">' + esc(t[s.plan] || s.plan) + (Object.keys(s.ov || {}).length ? ' · 单独改了 ' + Object.keys(s.ov).length + ' 项' : '') + (s.next_cut != null ? ' · 下周新词 ' + num(s.next_cut) + ' 个' : '') + '</div>' + bar + '</div>' +
+        '<div class="sub side"><div>' + wk + ' · 累计学过 ' + num(s.learned) + ' · 全亮 ' + num(s.correct) + '</div>' +
+        '<div>' + (lt ? '最近测验 ' + num(lt.score) + '/' + num(lt.total) + (lt.passed ? ' 及格' : lt.manual ? ' 放行' : ' 没及格' + (lt.fix ? '（已处理）' : '')) : '还没考过') + ' · ' + (s.last_seen ? '最后打开 ' + stamp(s.last_seen) : '还没打开过') + '</div></div></div>';
+    }).join('') + '</div>';
+  }
   function stuHTML() {
-    const t = TPL();
     let h = '<div class="row"><div class="muted">词库：' + LV.map(l => l + ' ' + (D.counts[l] || 0)).join(' · ') + '</div><button class="btn main" data-a="add">＋ 加学生</button></div>';
     if (D.reqs.length) h += '<div class="note rqbar"><span><b>有 ' + D.reqs.length + ' 个换方案申请</b>在等你处理</span><button class="gbtn" data-a="reqs">查看、处理</button></div>';
     const fs = failList();
     if (fs.length) h += '<div class="note rqbar fbar"><span><b>有 ' + fs.length + ' 个学生最近一次交卷没及格</b>：' + fs.slice(0, 3).map(x => esc(x.name) + '（' + esc(x.last_test.name || '') + ' ' + num(x.last_test.score) + '/' + num(x.last_test.total) + '）').join('、') + (fs.length > 3 ? ' 等' : '') + '</span><button class="gbtn" data-a="fails">查看、调整新词量</button></div>';
     if (!D.students.length) return h + '<div class="box"><h2>还没有学生</h2><div class="muted">点右上角「加学生」，加好后把专属链接发给学生，学生用手机打开就能学。</div></div>';
-    const rqs = new Set(D.reqs.map(r => r.sid));
-    h += '<div class="box"><div class="list">' + D.students.map(s => {
-      const w = s.week, lt = s.last_test;
-      const wk = w ? '第 ' + num(w.no) + ' 周' + (w.kind === 'R' ? '（回顾）' : '') + (w.cur ? (w.kind === 'L' ? (num(w.n) ? ' · 本周练过 ' + num(w.done) + '/' + num(w.n) : ' · <span class="chip warn">这周没有词</span>') : '') : '（已到期，学生还没打开新的一周）') : md(s.start) + ' 开始';
-      return '<div class="it clickable" data-stu="' + esc(s.id) + '" role="button" tabindex="0"><div class="main"><div class="nm">' + esc(s.name) + (s.grp ? ' <span class="chip">' + esc(s.grp) + '</span>' : '') + (s.streak ? ' <span class="chip ok">连续 ' + num(s.streak) + ' 天</span>' : '') + (s.active ? '' : ' <span class="chip bad">已停用</span>') + (rqs.has(s.id) ? ' <span class="chip warn">申请中</span>' : '') + (failOpen(s) ? ' <span class="chip bad">没及格待处理</span>' : '') + '</div>' +
-        '<div class="sub">' + esc(t[s.plan] || s.plan) + (Object.keys(s.ov || {}).length ? ' · 单独改了 ' + Object.keys(s.ov).length + ' 项' : '') + (s.next_cut != null ? ' · 下周新词 ' + num(s.next_cut) + ' 个' : '') + '</div></div>' +
-        '<div class="sub side"><div>' + wk + ' · 累计学过 ' + num(s.learned) + ' · 全亮 ' + num(s.correct) + '</div>' +
-        '<div>' + (lt ? '最近测验 ' + num(lt.score) + '/' + num(lt.total) + (lt.passed ? ' 及格' : lt.manual ? ' 放行' : ' 没及格' + (lt.fix ? '（已处理）' : '')) : '还没考过') + ' · ' + (s.last_seen ? '最后打开 ' + stamp(s.last_seen) : '还没打开过') + '</div></div></div>';
-    }).join('') + '</div></div>';
+    const nAct = D.students.filter(s => s.active).length, nStr = D.students.filter(s => s.active && num(s.streak) > 0).length;
+    h += '<div class="adm-kpis">' +
+      '<div class="adm-kpi"><b>' + nAct + '</b><span>在读学生' + (D.students.length > nAct ? '（停用 ' + (D.students.length - nAct) + '）' : '') + '</span></div>' +
+      '<div class="adm-kpi"><b>' + nStr + '</b><span>连续打卡中</span></div>' +
+      '<div class="adm-kpi"><b>' + fs.length + '</b><span>待调量处理</span></div>' +
+      '<div class="adm-kpi"><b>' + D.reqs.length + '</b><span>换方案申请</span></div></div>';
+    h += '<div class="stu-bar"><input type="search" id="stuQ" maxlength="30" placeholder="搜学生名字、班级或方案…" value="' + esc(stuQ) + '" aria-label="搜学生" autocomplete="off" spellcheck="false">' +
+      '<div class="seg" role="group" aria-label="筛选学生">' + [['all', '全部'], ['attn', '待处理'], ['streak', '打卡中']].map(([k, nm]) => '<button type="button" data-sf="' + k + '" aria-pressed="' + (stuFilter === k) + '">' + nm + '</button>').join('') + '</div></div>';
+    h += '<div class="box" id="stuList">' + stuListHTML() + '</div>';
     return h;
   }
   function addModal() {
@@ -243,7 +262,7 @@ const Adm = (() => {
     el.innerHTML = '<div class="stats"><div class="stat"><b>' + num(r.n) + '</b><span>一共刷的题</span></div><div class="stat"><b>' + pc(r.right, r.n) + '</b><span>正确率</span></div><div class="stat"><b>' + num(d7.n) + '</b><span>最近 7 天（正确率 ' + pc(d7.right, d7.n) + '）</span></div></div>' +
       '<div class="small muted">最近 30 天 ' + num(d30.n) + ' 题，正确率 ' + pc(d30.right, d30.n) + (r.last ? ' · 最后一次 ' + stamp(r.last) : '') + '</div>' +
       '<div class="scroll"><table class="t dst-t"><tr><th>题型</th><th>题数</th><th>正确率</th></tr>' + TYN.map(([k]) => k).filter(k => ty[k]).map(k => '<tr><td' + (QT[k] ? ' lang="ja"' : '') + '>' + tyName(k) + '</td><td>' + num(ty[k].n) + '</td><td>' + pc(ty[k].right, ty[k].n) + '</td></tr>').join('') + '</table></div>' +
-      (top.length ? '<div class="small muted" style="margin-top:6px">刷题常错的词（前 ' + top.length + ' 个）</div><div class="list">' + top.map(x => '<div class="it"><span><span class="nm" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r && x.r !== x.w ? x.r : '') + '</span> <span class="chip">' + esc(x.lvl) + '</span></span><span class="sub">' + esc(x.m) + ' · 错 ' + num(x.wrong) + ' / ' + num(x.n) + ' 次</span></div>').join('') + '</div>' : '');
+      (top.length ? '<div class="small muted" style="margin-top:6px">刷题常错的词（前 ' + top.length + ' 个）</div><div class="list">' + top.map(x => '<div class="it"><span><span class="nm" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r && x.r !== x.w ? x.r : '') + '</span> <span class="chip" data-lv="' + esc(x.lvl) + '">' + esc(x.lvl) + '</span></span><span class="sub">' + esc(x.m) + ' · 错 ' + num(x.wrong) + ' / ' + num(x.n) + ' 次</span></div>').join('') + '</div>' : '');
   }
   // 学生详情里的各题型正确率（第 37 步）：正式测验（交了卷的，没答的算错）、刷题（只算答了的）分开；最近几天／全部可以切换；题数少的标「题少」
   const TYN = [['yomi', '漢字読み'], ['hyoki', '表記'], ['bunmyaku', '文脈規定'], ['iikae', '言い換え'], ['yoho', '用法'], ['jc', '看日语选中文'], ['cj', '看中文选日语'], ['kr', '看汉字选读音'], ['ac', '听音选意思']];
@@ -586,7 +605,7 @@ const Adm = (() => {
     const pager = NL > 100 ? '<div class="row" style="justify-content:flex-start;gap:8px"><button type="button" class="gbtn" data-qa="page" data-off="' + Math.max(0, off - 100) + '"' + (off > 0 ? '' : ' disabled') + '>上一页</button><span class="muted small">第 ' + (off + 1) + '～' + Math.min(NL, off + 100) + ' 道（共 ' + NL + ' 道）</span><button type="button" class="gbtn" data-qa="page" data-off="' + (off + 100) + '"' + (off + 100 < NL ? '' : ' disabled') + '>下一页</button></div>' : '';
     const last = QS.view === 'last', vseg = '<div class="seg" role="group" aria-label="看哪些题"><button type="button" data-qa="view" data-v="diff" aria-pressed="' + !last + '">现在和初始不一样的</button><button type="button" data-qa="view" data-v="last" aria-pressed="' + last + '">上一次重算变了的</button></div>';
     h += '<section class="box qsl"><h2>星级变了的题 <small>' + (last ? '上一次重算时显示的星变了的（含变回初始星级的）' : '现在的星和初始星级不一样的，最近变的在前') + '</small></h2><div class="row" style="justify-content:flex-start;gap:8px">' + vseg + lvSel + '</div>' + pager +
-      (L.length ? '<div class="list">' + L.map(x => '<div class="it"><div><b lang="ja">' + esc(x.w) + '</b> <span class="muted" lang="ja">' + esc(x.r && x.r !== x.w ? x.r : '') + '</span> <span class="chip">' + esc(x.lvl) + '</span> <span class="chip">' + esc(QT[x.t] || x.t) + '</span></div>' +
+      (L.length ? '<div class="list">' + L.map(x => '<div class="it"><div><b lang="ja">' + esc(x.w) + '</b> <span class="muted" lang="ja">' + esc(x.r && x.r !== x.w ? x.r : '') + '</span> <span class="chip" data-lv="' + esc(x.lvl) + '">' + esc(x.lvl) + '</span> <span class="chip">' + esc(QT[x.t] || x.t) + '</span></div>' +
         '<div class="qq">' + esc(plain(x.q || '')) + '</div>' +
         '<div class="small">初始 ' + starTxt(x.est) + ' → 现在 <b>' + starTxt(Number.isInteger(x.now) ? x.now : x.star) + '</b>' + (Number.isInteger(x.now) && x.now === x.est ? '（回到初始）' : '') + (Number.isInteger(x.prev) && x.prev !== (Number.isInteger(x.now) ? x.now : x.star) ? '（变之前 ' + starTxt(x.prev) + '）' : '') + ' · 按答对率排位 ' + starTxt(x.real) +
         ' · 有效作答 ' + num(x.n) + ' 次，答对 ' + (num(x.n) ? Math.round(num(x.ok) * 100 / num(x.n)) : 0) + '%' + (x.at ? ' · ' + stamp(x.at) + ' 变的' : '') + '</div></div>').join('') + '</div>' : '<div class="muted">没有。' + (num(R.n) ? '' : '作答次数还不够（一道题要 ' + num(QS.min, 30) + ' 个学生做过）。') + '</div>') + pager + '</section>';
@@ -785,7 +804,7 @@ const Adm = (() => {
   function wdInit() { if (!WD) WD = { q: '', lv: '', st: 'all', off: 0, res: null, err: null, busy: false, todo: null, todoErr: null, log: null, logErr: null }; }
   const wdChips = x => (x.active ? '' : '<span class="chip bad">已停用</span>') + (x.new ? '<span class="chip">网页导入</span>' : '') +
     (x.au ? '' : '<span class="chip warn">没有单词读音</span>') + (num(x.nq) ? '' : '<span class="chip warn">没有 JLPT 题</span>');
-  const wdItem = (x, sub) => '<div class="it" data-wdid="' + esc(x.id) + '" role="button" tabindex="0"><div class="main"><div><span class="w" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r && x.r !== x.w ? x.r : '') + '</span> <span class="chip">' + esc(x.lvl) + '</span>' + wdChips(x) + '</div>' +
+  const wdItem = (x, sub) => '<div class="it" data-wdid="' + esc(x.id) + '" role="button" tabindex="0"><div class="main"><div><span class="w" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r && x.r !== x.w ? x.r : '') + '</span> <span class="chip" data-lv="' + esc(x.lvl) + '">' + esc(x.lvl) + '</span>' + wdChips(x) + '</div>' +
     '<div class="sub">' + esc(x.m) + ' · 编号 ' + esc(x.id) + (sub ? ' · ' + sub : '') + '</div></div></div>';
   function wdHTML() {
     wdInit();
@@ -876,7 +895,7 @@ const Adm = (() => {
     const c = w.card || {}, ed = w.ed || { m: '', tip: '', trap: '', ex: [] }, ex = Array.isArray(c.ex) ? c.ex : [], u = w.use || {}, lg = Array.isArray(w.log) ? w.log : [];
     const m = modal('<div class="row"><h2><span lang="ja">' + esc(c.w) + '</span> <small class="muted" lang="ja">' + esc(c.r !== c.w ? c.r : '') + '</small></h2><button type="button" class="gbtn" data-close>关闭</button></div>' +
       (msg ? '<div class="' + (bad ? 'warnbox' : 'note pok') + '" role="status">' + esc(msg) + '</div>' : '') +
-      '<div><span class="chip">' + esc(w.lvl) + '</span>' + wdChips(w) + ' <span class="small muted">编号 ' + esc(w.id) + (num(w.nq) ? ' · JLPT 题 ' + num(w.nq) + ' 道' : '') + '</span></div>' +
+      '<div><span class="chip" data-lv="' + esc(w.lvl) + '">' + esc(w.lvl) + '</span>' + wdChips(w) + ' <span class="small muted">编号 ' + esc(w.id) + (num(w.nq) ? ' · JLPT 题 ' + num(w.nq) + ' 道' : '') + '</span></div>' +
       '<div class="small muted">' + num(u.learned) + ' 个学生学过 · ' + num(u.wrong) + ' 个学生的错词本里有 · ' + num(u.week) + ' 个学生这周的词单里有</div>' +
       '<details><summary>看学生看到的卡片</summary><div class="card">' + cardBack(Object.assign({}, c, { id: w.id }), { noEx: true }) + '</div></details>' +
       '<form class="form" id="wde"><div class="note">写法「' + esc(c.w) + '」、读音「' + esc(c.r) + '」、词性「' + esc(c.p || '') + '」、日文例句不在网页上改（改了读音音频就对不上）。<b>要改读音或例句请联系管理员。</b></div>' +
@@ -1096,11 +1115,30 @@ const Adm = (() => {
       (scope === 'stu' ? (D.students.length ? '<select id="pickStu" aria-label="选学生">' + D.students.map(s => '<option value="' + s.id + '"' + (s.id === stuKey ? ' selected' : '') + '>' + esc(s.name) + '</option>').join('') + '</select>' : '<span class="muted">还没有学生</span>') : '') +
       '</div><div class="muted" id="who"></div>';
   }
+  const CFG_CATS = [['all', '全部设置'], ['learn', '学习与分档'], ['srs', '复习与回顾'], ['test', '测验与星级'], ['tool', '刷题与工具'], ['ai', '拓展AI']];
+  function catOfBox(sec) {
+    const id = sec.id || '', h2 = ((sec.querySelector('h2') || {}).textContent || '').trim();
+    if (/^按现在的设置/.test(h2)) return 'summary';
+    if (id === 'bxLv' || /^这个学生用哪个方案|^学习量|^学习循环/.test(h2)) return 'learn';
+    if (id === 'bxSrs' || id === 'bxChk' || id === 'bxRev' || id === 'bxRg') return 'srs';
+    if (id === 'bxQ' || id === 'bxY' || id === 'bxShow' || id === 'bxStar' || /^周测|^几场测验|^拼图/.test(h2)) return 'test';
+    if (id === 'bxDrill' || id === 'bxRetest' || id === 'bxWl' || id === 'bxLq') return 'tool';
+    if (id === 'bxEx') return 'ai';
+    return 'learn';
+  }
+  function applyCfgCat() {
+    document.querySelectorAll('.cfg-cats [data-cat]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.cat === cfgCat)));
+    document.querySelectorAll('main section.box').forEach(sec => {
+      const c = catOfBox(sec);
+      sec.classList.toggle('cat-hide', cfgCat !== 'all' && c !== 'summary' && c !== cfgCat);
+    });
+  }
   function cfgHTML() {
     if (scope === 'stu' && !D.students.length) return '<div class="box"><h2>还没有学生</h2><div class="muted">先在「学生」里加学生。</div></div>';
     if (scope === 'tpl' && !tplKey) return '<div class="box"><h2>还没有方案</h2><div class="muted">数据库里没有读到方案，请刷新页面；还是没有的话请联系管理员。</div></div>';
     const t = TPL(), CN = CNT(), rq = scope === 'stu' ? reqOf(stuKey) : null;
-    let h = '<section class="box"><h2>按现在的设置 <small id="sumWho"></small></h2><div class="stats">' +
+    const cats = scope === 'tpl' ? '' : '<div class="cfg-cats" role="group" aria-label="设置分组">' + CFG_CATS.filter(([k]) => k !== 'ai' || scope === 'global').map(([k, nm]) => '<button type="button" data-cat="' + k + '" aria-pressed="' + (cfgCat === k) + '">' + nm + '</button>').join('') + '</div>';
+    let h = cats + '<section class="box"><h2>按现在的设置 <small id="sumWho"></small></h2><div class="stats">' +
       '<div class="stat"><b id="sDay"></b><span id="sDayLab">每天新词</span></div><div class="stat"><b id="sWords"></b><span>所选档位的词</span></div><div class="stat"><b id="sWeeks"></b><span id="sYears"></span></div></div>' +
       '<div class="weeks" id="weeks"></div><div class="legend"><span><i style="background:var(--ai-soft)"></i>学新词</span><span><i style="background:var(--warn-bg)"></i>回顾周</span><span>前 16 周；按不追加、不缺学、错词不占名额估算</span></div>' +
       '<div class="note">改好点下面「保存」。<b>学生已经开始的这一周照旧</b>，从各自的下一周起用新设置（延长中的那一周也照旧）。</div></section>' +
@@ -1113,7 +1151,7 @@ const Adm = (() => {
       (scope === 'tpl' ? '<div class="muted">方案还可以单独设下面的「刷题」「整卷再做一遍」「题目上方的档和难度星级」' + (has37() ? '「全部词表和题型表现」' : '') + (has38() ? '「听力、随身听、快刷」' : '') + (has39() ? '「一个月后抽查」「回顾周每天的目标」' : '') + '；其他设置都跟「所有学生的默认」，要单独调某个学生请到「单个学生」。</div><div class="copyrow"><button type="button" class="gbtn" id="copyTpl">复制成新方案</button><button type="button" class="gbtn" id="renTpl">改名</button></div>' : '') +
       fld('mode', '学法', seg('c-mode', '学法', [['mix', '按比例混合'], ['step', '逐级'], ['only', '只学某几档']])) +
       '<div class="small muted" id="lvNote" hidden></div>' +
-      '<div class="sub2" id="pMix"><span class="inh" id="i-ratio"></span><div id="lvRows" style="display:flex;flex-direction:column;gap:8px">' +
+      '<div class="sub2" id="pMix"><span class="inh" id="i-ratio"></span><div class="ratio-stack" aria-hidden="true"><i id="rs0" style="background:#22C55E"></i><i id="rs1" style="background:#0EA5E9"></i><i id="rs2" style="background:#F59E0B"></i><i id="rs3" style="background:#6366F1"></i><i id="rs4" style="background:#EC4899"></i></div><div id="lvRows" style="display:flex;flex-direction:column;gap:8px">' +
       LV.map((l, i) => '<div class="lv"><b>' + l + '</b><div class="barr"><i id="bar' + i + '"></i></div><div class="step"><button type="button" data-r="' + i + '" data-dd="-1" aria-label="' + l + ' 减少">−</button><input id="r' + i + '" type="number" min="0" max="100" aria-label="' + l + ' 百分比"><span class="u">%</span><button type="button" data-r="' + i + '" data-dd="1" aria-label="' + l + ' 增加">+</button></div><span class="n" id="rn' + i + '"></span></div>').join('') +
       '</div><div class="sumline" id="ratioSum"><span id="ratioTxt"></span><button type="button" class="gbtn" id="ratioReset">恢复系统初始比例（' + DEF_RATIO.join('/') + '）</button></div></div>' +
       '<div class="sub2" id="pStep">' + fld('start', '从哪一档开始', seg('c-start', '从哪一档开始', LV.map(l => [l, l]))) + '<div class="note" id="stepTxt"></div></div>' +
@@ -1319,7 +1357,7 @@ const Adm = (() => {
         (fol.length ? (own.length ? '<br>' : '') + '跟这里默认学法的方案：' + fol.map(p => '「' + esc(p.name) + '」' + (p.ov && Array.isArray(p.ov.ratio) ? '（比例用方案自己的）' : '')).join('、') + '。' : (own.length ? '<br>' : '') + '现在没有方案跟这里的默认学法。');
     }
     const rs = e.ratio.reduce((a, c) => a + c, 0), per = alloc(e.weekly, e.ratio);
-    LV.forEach((l, i) => { $('bar' + i).style.width = Math.min(100, num(e.ratio[i])) + '%'; $('rn' + i).textContent = '约 ' + per[i] + ' 个/周'; });
+    LV.forEach((l, i) => { $('bar' + i).style.width = Math.min(100, num(e.ratio[i])) + '%'; const rsEl = $('rs' + i); if (rsEl) rsEl.style.width = Math.min(100, num(e.ratio[i])) + '%'; $('rn' + i).textContent = '约 ' + per[i] + ' 个/周'; });
     $('ratioTxt').textContent = '加起来 ' + rs + '%' + (rs === 100 ? '' : '，要正好 100% 才能保存') + '（右边的个数按常规每周新词数 ' + num(e.weekly, 100) + ' 个估算）' + (CNT().slice(1).every(x => !x) ? '。现在只有 N5 有词，其他档的名额先由 N5 补上' : '');
     $('ratioSum').classList.toggle('badsum', rs !== 100);
     const si = Math.max(0, LV.indexOf(e.start));
@@ -1406,7 +1444,10 @@ const Adm = (() => {
     if (!D || $('app').dataset.role !== 'adm' || e.target.closest('.modal')) return;
     const t = e.target;
     if (t.closest('button:disabled')) return;
-    const at = t.closest('[data-atab]'); if (at) { if (at.dataset.atab === tab || guard()) return; if (tab === 'wd') wdLeave(); tab = at.dataset.atab; draft = null; if (tab === 'ex') EXA = null; if (tab === 'qs') QS = null; render(); if (tab === 'wd') wdEnter(); return; }
+    const at = t.closest('[data-atab]'); if (at) { if (at.dataset.atab === tab || guard()) return; if (tab === 'wd') wdLeave(); tab = at.dataset.atab; cfgCat = 'all'; draft = null; if (tab === 'ex') EXA = null; if (tab === 'qs') QS = null; render(); if (tab === 'wd') wdEnter(); return; }
+    if (tab === 'stu') {
+      const sf = t.closest('[data-sf]'); if (sf) { stuFilter = sf.dataset.sf; document.querySelectorAll('[data-sf]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.sf === stuFilter))); const el = $('stuList'); if (el) el.innerHTML = stuListHTML(); return; }
+    }
     if (tab === 'wd') {   // 第 40 步：词库
       const wi = t.closest('[data-wdid]'); if (wi) { wordModal(wi.dataset.wdid); return; }
       const wl = t.closest('[data-wdlv],[data-wdst]'); if (wl) {
@@ -1435,7 +1476,8 @@ const Adm = (() => {
     const st = t.closest('[data-stu]'); if (st) { detailModal(st.dataset.stu); return; }
     if (tab !== 'cfg') return;
     if (savingCfg) { toast('正在保存，等一下'); return; }
-    const sc = t.closest('[data-scope]'); if (sc) { const ns = sc.dataset.scope, nk = sc.dataset.tpl || tplKey; if ((ns === scope && (ns !== 'tpl' || nk === tplKey)) || guard()) return; scope = ns; if (ns === 'tpl') tplKey = nk; draft = null; render(); window.scrollTo({ top: 0 }); return; }
+    const sc = t.closest('[data-scope]'); if (sc) { const ns = sc.dataset.scope, nk = sc.dataset.tpl || tplKey; if ((ns === scope && (ns !== 'tpl' || nk === tplKey)) || guard()) return; scope = ns; cfgCat = 'all'; if (ns === 'tpl') tplKey = nk; draft = null; render(); window.scrollTo({ top: 0 }); return; }
+    const ct = t.closest('[data-cat]'); if (ct) { cfgCat = ct.dataset.cat; applyCfgCat(); return; }
     const rqb = t.closest('[data-rq]'); if (rqb) { if (!rqb.disabled) decide(rqb.dataset.rq, rqb.dataset.ok === '1'); return; }
     if (t.closest('#copyTpl')) {   /* 新名字由数据库取（原名＋「 副本」，重名加序号，同时复制也不会重名） */
       if (guard() || copying) return;
@@ -1453,7 +1495,7 @@ const Adm = (() => {
       m.querySelector('#rnf').addEventListener('submit', async ev => { ev.preventDefault(); try { await rpc('adm_plan_rename', { pk: tplKey, nm: m.querySelector('#rnn').value }); m.remove(); toast('已改名'); await reload(); } catch (er) { fail(er); } });
       return;
     }
-    const jp = t.closest('[data-jump]'); if (jp) { const el = $(jp.dataset.jump); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    const jp = t.closest('[data-jump]'); if (jp) { if (cfgCat !== 'all') { cfgCat = 'all'; applyCfgCat(); } const el = $(jp.dataset.jump); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
     if (!draft) return;
     const sb = t.closest('button[data-k]'); if (sb) { const k = sb.dataset.k, [, mn, mx, sp] = NUM[k], v = Math.min(mx, Math.max(mn, Math.round((num(eff()[k], mn) + sp * (+sb.dataset.dd)) * 10) / 10)); $('f-' + k).value = v; setVal(k, v); return; }
     const rr = t.closest('button[data-r]'); if (rr) { const i = +rr.dataset.r, r = eff().ratio.slice(); r[i] = Math.min(100, Math.max(0, r[i] + (+rr.dataset.dd))); $('r' + i).value = r[i]; setVal('ratio', r); return; }
@@ -1473,7 +1515,11 @@ const Adm = (() => {
     if (t.closest('#discard')) { loadDraft(); typing = false; toast('已放弃本次编辑'); return; }
     if (t.closest('#save')) { saveCfg(t.closest('#save')); return; }
   });
-  document.addEventListener('input', e => { if ($('app').dataset.role === 'adm' && tab === 'cfg' && e.target.closest && e.target.closest('main')) typing = true; });
+  document.addEventListener('input', e => {
+    if ($('app').dataset.role !== 'adm') return;
+    if (tab === 'stu' && e.target && e.target.id === 'stuQ') { stuQ = e.target.value; const el = $('stuList'); if (el) el.innerHTML = stuListHTML(); return; }
+    if (tab === 'cfg' && e.target.closest && e.target.closest('main')) typing = true;
+  });
   document.addEventListener('change', e => {
     if (!D || $('app').dataset.role !== 'adm' || tab !== 'cfg') return;
     const t = e.target;

@@ -76,6 +76,35 @@ function toast(t, ms) { const el = $('toast'); el.textContent = t; el.hidden = f
 function fail(e) { toast(e && e.message ? e.message : '没成功，请再试一次'); }
 function busy(btn, on) { if (btn) { btn.disabled = on; } }
 
+// 四套界面配色（晴空蓝、竹林青、书卷暖、静夜深）与页签图标（纯图形，不影响按钮文字）
+const THEMES = [['sky', '晴空蓝'], ['bamboo', '竹林青'], ['paper', '书卷暖'], ['night', '静夜深']];
+const curTheme = () => { const t = document.documentElement.getAttribute('data-theme'); return THEMES.some(([k]) => k === t) ? t : ''; };
+function themeBarHTML() {
+  const cur = curTheme();
+  return '<div class="th-picker" role="group" aria-label="界面配色">' + THEMES.map(([k, nm]) => '<button type="button" class="thdot" data-th="' + k + '" title="配色：' + nm + '" aria-label="配色：' + nm + '" aria-pressed="' + (cur ? cur === k : k === 'sky') + '"></button>').join('') + '</div>';
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('[data-th]'); if (!b) return;
+  const th = b.dataset.th; if (!THEMES.some(([k]) => k === th)) return;
+  document.documentElement.setAttribute('data-theme', th);
+  try { localStorage.setItem('vocab_theme', th); } catch (er) {}
+  document.querySelectorAll('[data-th]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.th === th)));
+});
+const NAV_PATHS = {
+  study: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+  test: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+  drill: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+  err: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+  map: '<path d="m8 3 4 8 5-5 5 15H2L8 3z"/>',
+  stu: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  cfg: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.77 1.05 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  ex: '<path d="M12 3l1.9 5.8L20 10.7l-5.8 1.9L12 18.4l-2.2-5.8L4 10.7l6.1-1.9z"/>',
+  qs: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  wd: '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
+  log: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+};
+const navIcon = k => NAV_PATHS[k] ? '<svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + NAV_PATHS[k] + '</svg>' : '';
+
 // 读音：audio/ja/<编号>.mp3、_1、_2
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
 const aud = (id, part) => 'audio/ja/' + encodeURIComponent(id) + (part ? '_' + part : '') + '.mp3';
@@ -87,7 +116,15 @@ const slowBtn = (src, label) => '<button class="say slow" type="button" data-aud
 // audGen：每次「从外面」播或停（点喇叭、翻卡、换页……）加一；连播、随身听每一步都核对，变了就说明被别的声音打断了，不再往下播
 const player = new Audio(); player.preload = 'auto';
 let wantSrc = '', pDone = null, pQuiet = false, pRate = 1, audGen = 0, lastPlay = null;
-const pSettle = v => { const f = pDone; pDone = null; if (f) f(v); };
+function markPlaying(src, rate) {
+  document.querySelectorAll('.say.is-playing').forEach(b => b.classList.remove('is-playing'));
+  if (!src) return;
+  document.querySelectorAll('.say[data-audio]').forEach(b => {
+    const br = Number(b.dataset.spd) > 0 ? Number(b.dataset.spd) : 1;
+    if (b.dataset.audio === src && Math.abs(br - (rate || 1)) < 0.05) b.classList.add('is-playing');
+  });
+}
+const pSettle = v => { markPlaying(''); const f = pDone; pDone = null; if (f) f(v); };
 player.addEventListener('ended', () => pSettle('end'));
 player.addEventListener('error', () => { if (!wantSrc) return; if (!pQuiet) toast(navigator.onLine === false ? '暂时没连上网络，连上后再点喇叭' : '这条读音还没有，过一会儿再试'); pSettle('err'); });
 // 系统把声音停了（来电、别的应用放声音、拔耳机等）：当成被打断（自己换下一条时 play() 已经把 paused 改回 false，不会误判；正常播完 ended 是真的）
@@ -103,6 +140,7 @@ function playStep(src, opt) {
     pDone = res; pQuiet = !!opt.quiet; pRate = opt.rate > 0 ? opt.rate : 1;
     try {
       wantSrc = src; player.pause(); player.src = src;
+      markPlaying(src, pRate);
       try { player.defaultPlaybackRate = pRate; player.playbackRate = pRate; } catch (e) {}
       try { player.currentTime = 0; } catch (e) {}
       const p = player.play();
@@ -590,16 +628,18 @@ async function printPreview(info, words, o) {
 
 async function boot() {
   const app = $('app');
+  app.classList.remove('has-shell');
   if (!KEY) { app.innerHTML = '<div class="wrap boot">请用老师发给你的专属链接打开。</div>'; return; }
   const retry = '<p><button class="btn" onclick="location.reload()">重新打开</button></p>';
   try {
     const d = await rpc('stu_load', { cv: CV }, { obj: true });
     document.title = '单词学习';
+    app.classList.add('has-shell');
     Stu.start(d);
   } catch (e) {
     if (/没有权限/.test(e.message)) {
-      try { const d = await rpc('adm_load', {}, { obj: true }); document.title = '单词系统 · 管理'; Adm.start(d); }
-      catch (e2) { app.innerHTML = '<div class="wrap boot">' + esc(e2.message) + retry + '</div>'; }
+      try { const d = await rpc('adm_load', {}, { obj: true }); document.title = '单词系统 · 管理'; app.classList.add('has-shell'); Adm.start(d); }
+      catch (e2) { app.classList.remove('has-shell'); app.innerHTML = '<div class="wrap boot">' + esc(e2.message) + retry + '</div>'; }
     } else if (/链接无效|停用/.test(e.message)) {
       app.innerHTML = '<div class="wrap boot">' + esc(e.message) + '<p class="muted">请联系老师重新发一条链接。</p></div>';
     } else {
