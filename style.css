@@ -633,7 +633,7 @@ mark { background: var(--hl); color: var(--ai); font-weight: 600; border-radius:
 /* ── 测验与刷题卡片 ── */
 .q { font-family: var(--mincho); font-weight: 600; font-size: clamp(30px, 10vw, 48px); text-align: center; line-height: 1.3; padding-block: 18px 6px; word-break: break-word; }
 .q.zhq { font-family: var(--sans); font-weight: 600; font-size: 22px; }
-.opts { display: grid; gap: 9px; }
+.opts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; }
 .opt {
   border: 1px solid var(--line);
   background: var(--surface);
@@ -647,6 +647,9 @@ mark { background: var(--hl); color: var(--ai); font-weight: 600; border-radius:
   gap: 10px;
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
+.opt { min-width: 0; }
+/* 选项文字放进一个普通的块里：带注音的长句（用法题）照常一行行换行，不会被拆成一个个小块、撑出卡片 */
+.opt .ot { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .opt:hover:not(:disabled) { border-color: var(--ai); background: var(--subtle); }
 .opt.jpo { font-family: var(--jp); }
 .qs {

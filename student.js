@@ -811,7 +811,7 @@ const Stu = (() => {
         let cls = 'opt' + (jpOpt(it.t) ? ' jpo' : ''), no = String(j + 1), say = '';
         if (rs) { if (j === rs.a) { cls += ' right'; no = '✓'; say = '（正确答案）'; } else if (j === rs.mine) { cls += ' wrong'; no = '✗'; say = '（你选的，错了）'; } }
         else if (sel === j) cls += ' sel';
-        return '<button type="button" class="' + cls + '" data-opt="' + j + '" aria-pressed="' + (sel === j) + '"' + (lock ? ' disabled' : '') + (jpOpt(it.t) ? ' lang="ja"' : '') + '><span class="no">' + no + '</span>' + optHTML(it, o) + (say ? '<span class="sr">' + say + '</span>' : '') + '</button>';
+        return '<button type="button" class="' + cls + '" data-opt="' + j + '" aria-pressed="' + (sel === j) + '"' + (lock ? ' disabled' : '') + (jpOpt(it.t) ? ' lang="ja"' : '') + '><span class="no">' + no + '</span><span class="ot">' + optHTML(it, o) + (say ? '<span class="sr">' + say + '</span>' : '') + '</span></button>';
       }).join('') + '</div>';
   }
   // 当场判对错的这一题下面显示什么：结果和解析 / 正在判 / 正在取回 / 没取回来
