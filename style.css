@@ -551,7 +551,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   min-height: 296px;
   cursor: pointer;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   text-align: center;
   position: relative;
   box-shadow: var(--sh-card), 0 8px 0 -4px var(--surface), 0 8px 0 -3px var(--line), 0 15px 0 -8px var(--surface), 0 15px 0 -7px var(--line);
@@ -560,9 +560,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .front:hover { border-color: var(--ai-border); }
 .front:active { transform: scale(0.993); }
-.front .chips { position: absolute; top: 16px; left: 16px; right: 16px; display: flex; gap: 6px; flex-wrap: wrap; }
+/* 11-27：标签、正文、提示各占一行（不再叠在一起）：长词、多行释义时卡片自然变高；正文在标签和提示之间居中 */
+.front .chips { align-self: stretch; display: flex; gap: 6px; flex-wrap: wrap; }
+.front > .chips + * { margin-top: auto; }
 .big { font-family: var(--mincho); font-weight: 600; font-size: clamp(46px, 15vw, 72px); line-height: 1.22; letter-spacing: 0.02em; }
-.hint { position: absolute; bottom: 16px; left: 12px; right: 12px; font-size: 13px; color: var(--muted); }
+.front .big { max-width: 100%; overflow-wrap: anywhere; }
+.hint { margin-top: auto; font-size: 13px; color: var(--muted); }
 
 .head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .head .w { font-family: var(--mincho); font-weight: 600; font-size: 34px; line-height: 1.2; }
@@ -1366,3 +1369,185 @@ html.prt-on, html.prt-on body { overflow: hidden; }
 .impsum { font-size: 14px; line-height: 1.7; }
 .impsum b { font-weight: 600; }
 textarea.impt { width: 100%; font-family: var(--jp); font-size: 13px; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+
+/* ── 11-27 界面调整：学生端手机底部菜单栏、学习卡一屏看得见；管理端折叠块 ── */
+:root { --bnav-h: 58px; }   /* 底部菜单栏的高度（不含 iPhone 底部安全区） */
+.revb .revh { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
+.revb .revh h2 { font-size: 16px; font-weight: 700; margin: 0; }
+.revb .revh .btn { flex: none; }
+
+@media (max-width: 959px) {
+  /* 页面上下留位：内容最后一行、页脚不被底栏挡住；跳转、滚动到某一块时不停在底栏后面 */
+  html.stu-app { scroll-padding-top: 12px; scroll-padding-bottom: calc(var(--bnav-h) + 96px + env(safe-area-inset-bottom, 0px)); }
+  html.stu-app body { padding-bottom: calc(var(--bnav-h) + env(safe-area-inset-bottom, 0px)); }
+  html.stu-app .toast { bottom: calc(var(--bnav-h) + 84px + env(safe-area-inset-bottom, 0px)); }
+  html.stu-app .credit { padding-bottom: 14px; }
+
+  /* 顶部：只留名字、第几周、连续天数和配色，一行；不再吸顶（往下滑就让出屏幕） */
+  #app[data-role="stu"] > header.top { position: relative; top: auto; z-index: auto; background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  #app[data-role="stu"] > header.top > .wrap { padding-block: 8px; gap: 6px; }
+  /* 第一行：名字 · 连续天数 · 配色；第二行：第几周、日期（占满一行，不挤成三行） */
+  #app[data-role="stu"] > header.top .row:first-child {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "nm ck th" "sb sb sb";
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 1px;
+  }
+  #app[data-role="stu"] > header.top .brand, #app[data-role="stu"] > header.top .brand-txt, #app[data-role="stu"] > header.top .hdr-right { display: contents; }
+  #app[data-role="stu"] > header.top .brand .brand-mark { display: none; }
+  #app[data-role="stu"] > header.top .brand b { grid-area: nm; font-size: 16px; line-height: 1.3; overflow-wrap: anywhere; min-width: 0; }
+  #app[data-role="stu"] > header.top .brand span { grid-area: sb; font-size: 12px; }
+  #app[data-role="stu"] > header.top .hdr-right > .chip { grid-area: ck; padding: 2px 7px; font-size: 11.5px; }
+  #app[data-role="stu"] > header.top .th-picker { grid-area: th; }
+  #app[data-role="stu"] > header.top .prog { font-size: 12px; gap: 8px; }
+  #app[data-role="stu"] > header.top .track { height: 6px; }
+  #app[data-role="stu"] > main { padding-block: 12px 20px; gap: 12px; }
+
+  /* 五个页签：固定在屏幕最下面（图标＋文字），给 iPhone 底部的横条留出安全区 */
+  #app[data-role="stu"] > header.top .nav-main {
+    position: fixed;
+    z-index: 20;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    height: calc(var(--bnav-h) + env(safe-area-inset-bottom, 0px));
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: 2px;
+    margin: 0;
+    padding: 4px max(6px, env(safe-area-inset-right, 0px)) calc(4px + env(safe-area-inset-bottom, 0px)) max(6px, env(safe-area-inset-left, 0px));
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-radius: 0;
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 -10px 28px -18px rgba(10, 15, 26, 0.4);
+  }
+  #app[data-role="stu"] > header.top .nav-main button {
+    position: relative;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    min-width: 0;
+    padding: 2px 1px;
+    border-radius: 12px;
+    font-size: 11px;
+    line-height: 1.2;
+    font-weight: 500;
+    color: var(--muted);
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #app[data-role="stu"] > header.top .nav-main button svg.nav-ic { display: block; flex: none; width: 46px; height: 28px; padding: 4px 13px; border-radius: 999px; opacity: 0.9; transition: background-color 0.15s ease; }
+  #app[data-role="stu"] > header.top .nav-main button[aria-pressed="true"] { color: var(--ai); font-weight: 700; background: transparent; box-shadow: none; }
+  #app[data-role="stu"] > header.top .nav-main button[aria-pressed="true"] svg.nav-ic { background: var(--ai-soft); opacity: 1; }
+  #app[data-role="stu"] > header.top .nav-main .nl { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #app[data-role="stu"] > header.top .nav-main .nb {
+    position: absolute;
+    top: 1px;
+    left: calc(50% + 7px);
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: var(--bad);
+    color: var(--surface);
+    font-size: 10.5px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+    box-shadow: 0 0 0 2px var(--surface);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 吸底的按钮条（翻面看答案、评分、上一题／下一题、随身听、快刷、刷题的「开始」）都停在底栏上面 */
+  #app[data-role="stu"] .bar { bottom: calc(var(--bnav-h) + env(safe-area-inset-bottom, 0px)); padding-bottom: 10px; }
+  #app[data-role="stu"] .dbar { bottom: calc(var(--bnav-h) + env(safe-area-inset-bottom, 0px)); padding-bottom: 12px; }
+
+  /* 学习卡（只管学习页这一张，快刷卡照旧）：最矮高度由 fitFront 按屏幕算（这里是还没算时的近似值）；内容多时自然变高 */
+  #app[data-role="stu"] #front { min-height: clamp(150px, calc(100vh - 470px), 296px); padding: 14px 16px; gap: 6px; }
+  #app[data-role="stu"] .qfcard { min-height: clamp(200px, calc(100vh - 330px), 300px); }   /* 快刷卡：矮屏上先矮一点，内容多时照样自然变高 */
+  /* 手机键盘真的开着时（在输入框里打字）只把底栏藏起来（看不见、点不到，位置照旧占着）；别的东西都不挪：按钮条照旧停在底栏上方，弹窗、页面底部留白都不变。
+     按下按钮时输入框失焦、底栏回来，按钮也不会跳走 */
+  html.stu-app.kb-on #app[data-role="stu"] > header.top .nav-main { visibility: hidden; pointer-events: none; }
+  /* 配色小圆点：圆点样子不变，可点的范围放大到 32×32（相邻的不重叠） */
+  .th-picker { gap: 14px; padding: 4px 9px; }
+  .thdot { position: relative; width: 18px; height: 18px; }
+  .thdot::after { content: ""; position: absolute; inset: -9px; border-radius: 12px; }   /* 圆点 18（边框 2）＋四周各 9 ＝ 32 */
+  /* 本周任务：第一行「本周任务」和「明细」，第二行一句话 */
+  #app[data-role="stu"] details.task { padding: 0 14px; }
+  #app[data-role="stu"] details.task > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; padding: 9px 0; min-height: 44px; }
+  #app[data-role="stu"] details.task > summary b { grid-column: 1; grid-row: 1; }
+  #app[data-role="stu"] details.task > summary span { grid-column: 1 / -1; grid-row: 2; }
+  #app[data-role="stu"] details.task > summary::after { grid-column: 2; grid-row: 1; margin-left: 0; content: "明细 ▾"; }
+  #app[data-role="stu"] details.task[open] > summary::after { content: "收起 ▴"; }
+  #app[data-role="stu"] .revb { padding: 12px 14px; gap: 6px; }
+  #app[data-role="stu"] .revb .revh .btn { padding: 9px 14px; font-size: 14px; }
+}
+@media (max-width: 350px) {
+  #app[data-role="stu"] > header.top .nav-main button { font-size: 10.5px; }
+  #app[data-role="stu"] > header.top .nav-main button svg.nav-ic { width: 40px; padding: 4px 10px; }
+}
+/* 弹窗贴着屏幕最下面时，给 iPhone 底部横条留出位置 */
+.modal { padding-bottom: max(14px, env(safe-area-inset-bottom, 0px)); }
+
+/* 管理端折叠块：标题写清里面是什么、右边写数量或状态；点开、收起记在这个浏览器 */
+details.fold { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); min-width: 0; }
+details.fold > summary {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  min-height: 46px;
+  padding: 9px 42px 9px 14px;
+  cursor: pointer;
+  list-style: none;
+  border-radius: 13px;
+  transition: background-color 0.12s ease;
+}
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary::after {
+  content: "";
+  position: absolute;
+  right: 17px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--ai);
+  border-bottom: 2px solid var(--ai);
+  transform: translateY(-70%) rotate(45deg);
+  transition: transform 0.15s ease;
+}
+details.fold[open] > summary::after { transform: translateY(-25%) rotate(-135deg); }
+details.fold > summary:hover { background: var(--subtle); }
+details.fold[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+details.fold > summary:focus-visible { outline: 2px solid var(--ai); outline-offset: 2px; }
+.ftl { font-weight: 600; font-size: 14px; color: var(--ink); }
+.ftl small { font-weight: 400; font-size: 12px; color: var(--muted); margin-left: 4px; }
+.fst { font-size: 12px; color: var(--muted); display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+.fst .chip { font-size: 11px; }
+details.fold > .fbd { padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; border-top: 1px solid var(--line); padding-top: 12px; }
+.fbd > .row { min-width: 0; }
+.folds { display: flex; flex-direction: column; gap: 8px; }
+/* 设置页：每一块的标题就是折叠开关，标题下面一行写现在的设置（单独设了几项、改了几处没保存） */
+section.box > details.fold.sec { border: 0; border-radius: 0; background: none; }
+section.box > details.fold.sec > summary { padding: 2px 36px 2px 0; min-height: 40px; border-radius: 10px; }
+section.box > details.fold.sec > summary:hover { background: none; }
+section.box > details.fold.sec > summary:hover h2 { color: var(--ai); }
+section.box > details.fold.sec > summary::after { right: 10px; top: 13px; transform: rotate(45deg); }
+section.box > details.fold.sec[open] > summary::after { top: 17px; transform: rotate(-135deg); }
+section.box > details.fold.sec > summary h2 { font-size: 16px; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; flex-basis: 100%; text-wrap: balance; }
+section.box > details.fold.sec > summary h2 small { font-weight: 400; font-size: 12px; color: var(--muted); }
+section.box > details.fold.sec > summary .fst { flex-basis: 100%; }
+section.box > details.fold.sec > summary .fst:empty { display: none; }
+section.box > details.fold.sec[open] > summary { margin-bottom: 4px; }
+section.box > details.fold.sec > summary + .field { border-top: 0; }

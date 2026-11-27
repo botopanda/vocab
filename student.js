@@ -132,7 +132,7 @@ const Stu = (() => {
     D.rg = rgPick(old, g, false);
     if (old && typeof old === 'object' && old.start === g.start && old.rk !== g.rk && rq > rgSeen) rgDiff = true;
   }
-  function start(d) { if (!Number.isFinite(d._rq)) d._rq = ++rgSent; apply(d); resetQueue(); render(); flushMarks(); flushRound(); seenRetry(); }   // 上次没确认的打卡、复习本轮的进度、没报上的「看过」：打开页面就补
+  function start(d) { $('app').dataset.role = 'stu'; document.documentElement.classList.add('stu-app'); if (!Number.isFinite(d._rq)) d._rq = ++rgSent; apply(d); resetQueue(); render(); flushMarks(); flushRound(); seenRetry(); }   // 上次没确认的打卡、复习本轮的进度、没报上的「看过」：打开页面就补；11-27：标上学生页（手机宽度时页签放到最下面）
   // 读取一次：比后面发出的请求还晚回来的、比页面上已经显示的日期或周还旧的，都不用（返回 null）
   const behind = d => !!(D && D.week && d.week && (d.week.today < D.week.today || (d.week.today === D.week.today && d.week.no < D.week.no)));
   async function load() {
@@ -217,7 +217,7 @@ const Stu = (() => {
     const tabs = [['study', '学习'], ['test', '测验'], ...(drillOn() || tab === 'drill' ? [['drill', '刷题']] : []), ['err', '错词本'], ['map', '进度']];
     return '<header class="top"><div class="wrap">' +
       '<div class="row"><div class="brand"><span class="brand-mark" aria-hidden="true">言</span><div class="brand-txt"><b>' + esc(D.me.name) + '</b><span>第 ' + w.no + ' 周 · ' + (L ? '学新词' : '回顾周') + ' · ' + md(w.start) + '～' + md(w.end) + (w.extended ? '（已延长）' : '') + '</span></div></div><div class="hdr-right">' + (D.stats ? '<span class="chip' + (D.stats.streak ? ' ok' : '') + '">连续 ' + D.stats.streak + ' 天</span>' : '') + themeBarHTML() + '</div></div>' +
-      '<div class="seg nav-main" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k || (k === 'map' && (tab === 'words' || tab === 'listen' || tab === 'flash'))) + '">' + navIcon(k) + n + (k === 'err' && en ? ' ' + en : '') + '</button>').join('') + '</div>' +   // 全部词表、随身听、快刷在「进度」里面
+      '<div class="seg nav-main" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k || (k === 'map' && (tab === 'words' || tab === 'listen' || tab === 'flash'))) + '">' + navIcon(k) + '<span class="nl">' + n + '</span>' + (k === 'err' && en ? '<span class="nb"> ' + en + '</span>' : '') + '</button>').join('') + '</div>' +   // 全部词表、随身听、快刷在「进度」里面；11-27：手机上这一排固定在屏幕最下面（错词本的数是角上的小红点，文字照旧「错词本 5」）
       (L && tot && tab === 'study' && mode !== 'rev' && !w.waiting ? '<div class="prog"><span>本周练过 ' + done + ' / ' + tot + '</span><div class="track"><div class="fill" style="width:' + (done / tot * 100) + '%"></div></div></div>' : '') +
       '</div></header>';
   }
@@ -244,7 +244,79 @@ const Stu = (() => {
     if (PR) prSeen();
     if (tab === 'words' && !PR) wlPaint();
     acAuto();
+    fitFront();
   }
+  // 11-27：手机宽度时学习卡正面的高度跟着屏幕走：页面在最上面时，卡片下边停在「翻面看答案」那一条上面（最矮 150、最高 296 像素；词长、内容多时卡片自然变高），
+  // 卡片里的词一打开就看得见，不会被下面的按钮条、页签挡住。电脑宽屏不动（照旧 296）。
+  // 什么时候挪页面（都按词和按钮条的实际位置判断）：
+  //   换到一张新卡（页面在最上面）：词被挡住就往下挪，刚好露出词（屏幕太矮、上面几块又多时）；
+  //   同一张卡，屏幕尺寸变了（横竖屏、窗口变矮、浏览器工具条）、字体晚到、上面几块重画变高：原来正看得见词、变了以后被挡住，才挪到刚好露出词；
+  //   学生自己往上滑看任务（词本来就没在看）、自己点开「本周任务」：不挪。
+  //   复查第 2 轮：尺寸变了到真正挪之前，只要学生自己动了页面（摸屏、拖、滚轮、翻页键方向键，或者页面已经往上走了），这一次就不挪，只重算卡片高度——宁可少挪，不和学生抢页面。
+  let fitKey = '', fitSeen = false, fitSize = '', fitY = 0, fitPend = null;   // fitY：上一次「稳定」时（没在变尺寸）页面滚到哪；fitPend：尺寸刚变、还没挪 { user 学生动过 }
+  const fitGeo = () => {
+    const f = $('front'), w = f && f.querySelector('.big, .qfm'), bar = f && f.nextElementSibling; if (!w || !bar || !bar.classList.contains('bar')) return null;
+    const a = w.getBoundingClientRect(), b = bar.getBoundingClientRect(), c = f.getBoundingClientRect(); return { wt: a.top, wb: a.bottom, bt: b.top, cb: c.bottom };
+  };
+  const fitVis = g => !!g && g.wt >= -1 && g.wb <= g.bt + 1;
+  function fitShow(all) {   // 往下挪到刚好露出词（all：新的一张卡，挪到整张卡都露出来）；放不下时以词为准（词的上沿留在屏幕里，词比空间还高时露出上沿）
+    const g = fitGeo(); if (!g || (fitVis(g) && (!all || g.cb <= g.bt + 1))) return;
+    const d = g.wt < -1 ? g.wt - 8 : Math.min((all ? Math.max(g.cb, g.wb) : g.wb) - g.bt + 10, g.wt - 8);
+    if (d) window.scrollBy(0, d);
+  }
+  const fitSz = () => window.innerWidth + 'x' + window.innerHeight;
+  function fitMark() { fitSeen = fitVis(fitGeo()); fitSize = fitSz(); fitY = window.scrollY; }
+  function fitFront(why) {
+    const f = $('front'); if (!f) { fitKey = ''; fitSeen = false; fitPend = null; return; }
+    const was = fitSeen && fitSize !== '', pend = why === 'size' ? fitPend : null;
+    f.style.minHeight = '';
+    if (window.innerWidth >= 960) { fitPend = null; fitMark(); return; }
+    const bar = f.nextElementSibling, nav = document.querySelector('#app > header.top .nav-main');
+    const nh = nav && getComputedStyle(nav).position === 'fixed' ? nav.getBoundingClientRect().height : 0;
+    const bh = bar && bar.classList.contains('bar') ? bar.getBoundingClientRect().height : 0;
+    const top = f.getBoundingClientRect().top + window.scrollY, room = Math.floor(window.innerHeight - nh - bh - top - 18);
+    f.style.minHeight = Math.max(150, Math.min(296, room)) + 'px';
+    const key = mode + '|' + (queue[0] || ''), fresh = key !== fitKey;
+    fitKey = key;
+    requestAnimationFrame(() => {   // 等「评分后回到页面最上面」那一下之后再量、再挪
+      if (pend && pend === fitPend) fitPend = null;
+      if ($('front') !== f) return;
+      const mine = pend && (pend.user || window.scrollY < fitY - 2);   // 尺寸变的这段时间学生自己动过页面、或者页面往上走了：这次不挪
+      if (fresh ? window.scrollY < 4 : was && why !== 'task' && !mine) fitShow(fresh);
+      fitMark();
+    });
+  }
+  let fitT = 0, fitR = 0;
+  window.addEventListener('resize', () => { if (!fitPend) fitPend = { user: false }; clearTimeout(fitT); fitT = setTimeout(() => fitFront('size'), 120); });
+  const fitUser = () => { if (fitPend) fitPend.user = true; };
+  ['touchstart', 'touchmove', 'wheel'].forEach(ev => window.addEventListener(ev, fitUser, { passive: true }));
+  window.addEventListener('keydown', e => { if (['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' ', 'Spacebar'].includes(e.key)) fitUser(); });
+  // 学生自己滑动：记下现在看不看得见词、滚到哪（屏幕尺寸正在变的那一下不算，免得把「本来在看卡」冲掉）；尺寸刚变时页面往上走了＝学生自己往上滑
+  window.addEventListener('scroll', () => {
+    if (fitPend && window.scrollY < fitY - 2) fitPend.user = true;
+    if (fitR || !$('front')) return;
+    fitR = requestAnimationFrame(() => { fitR = 0; if (fitSz() === fitSize && !fitPend) { fitSeen = fitVis(fitGeo()); fitY = window.scrollY; } });
+  }, { passive: true });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => fitFront('font')).catch(() => {});   // 字体晚到、上面几块变高：再量一次
+  // 11-27：手机上在输入框里打字（键盘真的弹出来）时先收起底栏；键盘收起（哪怕光标还在框里）、离开输入框就放回来。
+  // 复查第 2 轮：键盘开没开看「实际看得见的高度」（visualViewport）：比基准（没在打字时、或者窗口宽度一变就重记的窗口高度）矮了四分之一以上才算开着；浏览器没有 visualViewport 就不藏。
+  // 复查第 3 轮：页面被放大（缩放不是 1）一律不算键盘；转屏、改窗口宽度时基准重记成现在的高度（不沿用竖屏的数）。拿不准就让底栏照常显示。
+  // 复查第 4 轮：只做「藏底栏」这一件事，而且只藏不挪：按钮条、弹窗、页面留白都不跟着键盘动（按下按钮时输入框失焦、底栏回来，按钮也不会跳走）；取不到 visualViewport 时一律不藏
+  const KB_SEL = 'input:not([type]), input[type="text"], input[type="search"], input[type="number"], input[type="email"], input[type="tel"], input[type="url"], input[type="password"], textarea';
+  const VV = window.visualViewport || null;
+  let kbBase = window.innerHeight, kbW = window.innerWidth;
+  const typingNow = () => { const a = document.activeElement; return $('app').dataset.role === 'stu' && !!(a && a.matches && a.matches(KB_SEL)); };
+  function kbCheck() {
+    const typing = typingNow(), h = document.documentElement;
+    if (!typing || Math.abs(window.innerWidth - kbW) > 40) { kbBase = window.innerHeight; kbW = window.innerWidth; }   // 没在打字、或者宽度明显变了（转屏、改窗口宽）：基准重记
+    const zoomed = !!VV && Math.abs((VV.scale || 1) - 1) > 0.05;
+    const on = typing && !!VV && !zoomed && VV.height < kbBase * 0.75;
+    h.classList.toggle('kb-on', on);
+  }
+  document.addEventListener('focusin', () => kbCheck());
+  document.addEventListener('focusout', () => setTimeout(kbCheck, 0));
+  window.addEventListener('resize', kbCheck);
+  if (VV) { VV.addEventListener('resize', kbCheck); VV.addEventListener('scroll', kbCheck); }
   // 练习、刷题翻到第 i 题：告诉服务器「学生看过这道题了」（周测优先出没见过的题型）。第 1 题服务器出题时已经记了；
   // 没报上（断网）的下次显示这一题时再报；不算作答、不进刷题统计
   // 没报上的记在 seenQ（练习编号|题号），网络恢复、下次画页面时补报；按练习编号＋题号去重。
@@ -331,9 +403,10 @@ const Stu = (() => {
     if (!D.cfg.srsOn || mode === 'rev') return '';
     if (!n) return (D.review || []).length ? '<div class="note">今天该复习的词都复习完了。</div>' : '';
     const ck = revLeft().filter(c => c.chk).length;   // 第 39 步：其中一个月后抽查的词
-    return '<div class="box"><h2>今天先复习 ' + n + ' 个 <small>学过的词按遗忘曲线回来；每次点「会了」，下次隔得更久（1、2、4、7、15 天）</small></h2>' +
-      (ck ? '<div class="muted small">其中 ' + ck + ' 个是「抽查」：以前已经复习熟（5 次都「会了」）的词，隔了一段时间再看看还记不记得（不算新学）。</div>' : '') +
-      '<div><button class="btn main" data-act="rev">先复习这 ' + n + ' 个</button></div></div>';
+    // 11-27：标题和按钮放一行、说明放下面一行小字（手机上少占一截，下面的单词卡露得出来）
+    return '<div class="box revb"><div class="revh"><h2>今天先复习 ' + n + ' 个</h2><button class="btn main" data-act="rev">先复习这 ' + n + ' 个</button></div>' +
+      '<div class="muted small">学过的词按遗忘曲线回来；每次点「会了」，下次隔得更久（1、2、4、7、15 天）</div>' +
+      (ck ? '<div class="muted small">其中 ' + ck + ' 个是「抽查」：以前已经复习熟（5 次都「会了」）的词，隔了一段时间再看看还记不记得（不算新学）。</div>' : '') + '</div>';
   }
   function studyHTML() {
     const w = D.week;
@@ -2251,7 +2324,7 @@ const Stu = (() => {
   document.addEventListener('pointercancel', () => { qfDown = null; });
   document.addEventListener('toggle', e => { if (e.target && e.target.id === 'lqset' && LQ) LQ.setOpen = e.target.open; }, true);
   // 「本周任务」点开、收起：记住（重画页面时照样）
-  document.addEventListener('toggle', e => { if (e.target && e.target.id === 'task') taskOpen = e.target.open; if (e.target && e.target.id === 'wlf' && WL) WL.fopen = e.target.open; }, true);
+  document.addEventListener('toggle', e => { if (e.target && e.target.id === 'task') { taskOpen = e.target.open; fitFront('task'); } if (e.target && e.target.id === 'wlf' && WL) WL.fopen = e.target.open; }, true);   // 11-27：本周任务点开、收起以后学习卡重新量高度
   document.addEventListener('input', e => {
     if (!D || $('app').dataset.role === 'adm' || !e.target || e.target.id !== 'dcustom' || !DS) return;
     DS.custom = e.target.value.trim();

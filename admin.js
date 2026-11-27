@@ -53,6 +53,10 @@ const Adm = (() => {
   const TPL = () => Object.fromEntries(D.plans.map(p => [p.key, p.name]));
   const CNT = () => LV.map(l => +(D.counts[l] || 0));
   const stuOf = id => D.students.find(s => s.id === id);
+  // 11-27 折叠块：key 记开合（见 app.js 的 foldAttr）、def 默认开不开、title 标题（可以带 <small>）、stat 标题后面的数量或状态、body 里面的内容（都是已经转义好的网页代码）
+  // 一整块（box）的标题就是折叠开关：后面接内容，最后接 '</details></section>'
+  const secFold = (key, def, h2, stat, cls) => '<section class="box' + (cls ? ' ' + cls : '') + '"><details class="fold sec"' + foldAttr(key, def) + '><summary>' + h2 + '<span class="fst">' + (stat || '') + '</span></summary>';
+  const foldHTML = (key, def, title, stat, body, id) => '<details class="fold"' + (id ? ' id="' + id + '"' : '') + foldAttr(key, def) + '><summary><span class="ftl">' + title + '</span>' + (stat ? '<span class="fst">' + stat + '</span>' : '') + '</summary><div class="fbd">' + body + '</div></details>';
 
   function fix() { D.global = Object.assign({ srsOn: true, srsN: 20, order: 'mix', instant: true, whyT: clone(DEF_WHY) }, D.global || {}); D.plans = D.plans || []; D.reqs = Array.isArray(D.reqs) ? D.reqs : []; D.students = D.students || []; D.logs = D.logs || []; D.counts = D.counts || {}; if (!D.plans.some(p => p.key === tplKey)) tplKey = D.plans.length ? D.plans[0].key : null; if (copied && D.plans.some(p => p.key === copied)) copied = null; }
   function start(d) { D = d; fix(); $('app').dataset.role = 'adm'; render(); }
@@ -177,28 +181,38 @@ const Adm = (() => {
     const t = TPL(), KN = { week: '周测', review: '回顾测', quarter: '季度测', year: '年测' };
     const weeks = Array.isArray(det.weeks) ? det.weeks : [], wrong = Array.isArray(det.wrong) ? det.wrong : [], cur = det.cur;
     const extTxt = cur ? '延长第 ' + num(cur.no) + ' 周 1 周：结束日 ' + md(cur.end) + ' → ' + md(addDays(cur.end, 7)) + '（马上生效）' : (s.active ? '还没开始，不用延长' : '已停用');
+    // 11-27：折叠块标题上的数：调整有几项（这一周没有新词时多一项「补发新词」）；每一周里最近交的一场
+    const refill = !!(cur && cur.kind === 'L' && !num(cur.nnew) && !cur.tested), adjN = refill ? 4 : 3;
+    let lastW = null, lastX = null;
+    for (const w of weeks) for (const x of (w.tests || [])) if (x.done && (!lastW || num(w.no) >= num(lastW.no))) { lastW = w; lastX = x; }
+    const lastT = lastX ? '第 ' + num(lastW.no) + ' 周' + (KN[lastX.kind] || '') + ' ' + num(lastX.score) + '/' + num(lastX.total) + (lastX.passed ? ' 及格' : lastX.manual ? ' 放行' : ' 没及格') : '';
     const m = modal('<div class="row"><h2>' + esc(s.name) + ' <small class="muted">学生编号 ' + esc(String(sid).slice(0, 8)) + '</small></h2><button class="gbtn" data-close>关闭</button></div>' +
       '<div class="muted">' + esc(t[s.plan] || s.plan) + ' · ' + md(s.start) + ' 开始' + (s.memo ? ' · ' + esc(s.memo) : '') + '</div>' +
       (cur ? '<div class="note">现在第 <b>' + num(cur.no) + '</b> 周' + (cur.kind === 'R' ? '（回顾周）' : '') + '：' + md(cur.start) + '～' + md(cur.end) + (cur.kind === 'L' ? ' · 本周练过 <b>' + num(cur.done) + ' / ' + num(cur.n) + '</b>' : '') + '</div>' : '') +
       (failOpen(s) ? '<div class="warnbox">' + esc(s.last_test.name || '最近一次测验') + '没及格（' + num(s.last_test.score) + '/' + num(s.last_test.total) + '，及格线 ' + num(s.last_test.pass, 95) + '%）<button class="gbtn" data-d="fail">调整新词量</button></div>' :
         s.last_test && s.last_test.fix ? '<div class="note">' + esc(s.last_test.name || '最近一次测验') + '没及格，已处理：' + esc(fixTxt(s.last_test.fix)) + '</div>' : '') +
-      '<div class="row" style="justify-content:flex-start"><button class="gbtn" data-d="link">专属链接</button><button class="gbtn" data-d="cfg">改这个学生的设置</button><button class="gbtn" data-d="edit">改名字/备注/停用</button>' +
-      (cur && cur.kind === 'L' ? '<button class="gbtn" data-d="words">这一周的词单（换词）</button>' : '') +
-      '<button class="gbtn" data-d="pweek">打印' + (cur && cur.kind === 'R' ? '本轮复习的词' : '本周词单') + '</button><button class="gbtn" data-d="perr">打印错词本</button></div>' +   // 第 40 步
-      '<div class="lab">只对这个学生、马上生效</div>' +
-      '<div class="form"><div class="row"><span>' + esc(extTxt) + '</span><button class="gbtn" data-d="extend"' + (cur ? '' : ' disabled') + '>延长 1 周</button></div>' +
-      (cur && cur.kind === 'L' && !num(cur.nnew) && !cur.tested ? '<div class="row"><span>' + (cur.check ? '<b>请核对：</b>旧记录分不清有没有给这个学生设过「下周暂停/减量」，这一周先没自动发词。确认要学的话，补发几个：' : '这一周没有新词（还没开考）。现在补发几个：') + '</span><span class="copyrow"><input id="refv" type="number" min="1" max="500" value="' + num(cur.weekly, 100) + '" style="width:80px" aria-label="补发几个新词"><button class="gbtn" data-d="refill">补发新词</button></span></div>' : '') +
-      '<div class="row"><span>设置下周新词数（只改下一个学新词周，遇回顾周顺延；上周的错词照常全部带上；0 ＝ 暂停新词）</span><span class="copyrow"><input id="cutv" type="number" min="0" max="500" value="' + num(s.next_cut ?? 50, 50) + '" style="width:80px" aria-label="下周新词数"><button class="gbtn" data-d="cut">设好</button></span></div>' +
-      '<div class="row"><span>把这一周最近交的那场记为及格（原分数保留）；以前的某一场在下面表里点「记为及格」</span><button class="gbtn" data-d="pass">手动放行</button></div></div>' +
-      '<div class="lab">每一周</div><div class="scroll"><table class="t"><tr><th>周</th><th>开始</th><th>词数</th><th>练过</th><th>测验</th></tr>' +
-      (weeks.length ? weeks.map(w => '<tr><td>第 ' + num(w.no) + ' 周' + (w.kind === 'R' ? '（回顾）' : '') + (w.extended ? '（延长）' : '') + '</td><td>' + md(w.start) + '</td><td>' + (w.kind === 'L' ? '共 ' + num(w.n) + ((w.carry || w.extra) ? '（' + [w.carry ? '错词 ' + num(w.carry) : '', w.extra ? '追加 ' + num(w.extra) : ''].filter(Boolean).join('、') + '）' : '') : (w.carry ? '错词 ' + num(w.carry) : '—')) + '</td><td>' + (w.kind === 'L' ? num(w.done) : '—') + '</td><td>' +
-        ((w.tests || []).length ? w.tests.map(x => (KN[x.kind] || '') + ' ' + (x.done ? num(x.score) + '/' + num(x.total) + ' ' + (x.passed ? '<span class="chip ok">及格</span>' : x.manual ? '<span class="chip">放行</span>' : '<span class="chip bad">没及格</span> <button class="link" data-tpass="' + esc(x.id) + '">记为及格</button>') : '考到一半')).join('<br>') : '没考') + '</td></tr>').join('') : '<tr><td colspan="5" class="muted">' + (s.active ? '还没有开始的周（开课日之前不生成）' : '没有记录') + '</td></tr>') +
-      '</table></div>' +
-      '<div class="lab">错过的词 ' + wrong.length + ' 个' + (wrong.length > 60 ? '，下面显示错得最多的 60 个' : '') + '</div>' +
-      (wrong.length ? '<div class="list">' + wrong.slice(0, 60).map(x => '<div class="it"><span><span class="nm" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r) + '</span></span><span class="sub">' + esc(x.m) + ' · 错 ' + num(x.times) + ' 次' + (x.st === 'correct' ? ' · 后来对了' : '') + (x.off ? ' · 已停用' : '') + '</span></div>').join('') + '</div>' : '<div class="muted">还没有。</div>') +
-      (det.chk && typeof det.chk === 'object' ? '<div class="lab">一个月后抽查（试点） <small class="muted">' + (det.chk.on ? '开着' : '关着') + '</small></div>' + chkHTML(det.chk) : '') +   // 第 39 步
-      '<div class="lab">刷题 <small class="muted">不算成绩、不进错词本</small></div><div id="dstat" class="muted">正在读取……</div>' +
-      (has37() ? '<div class="lab">各题型正确率 <small class="muted">和学生「进度」页看到的一样</small></div><div id="tstat" class="muted">正在读取……</div>' : ''));
+      // 11-27：常用的三个按钮直接放；打印、改名字/停用收进「更多操作」；调整、每一周、错过的词、抽查、刷题、各题型正确率各自折起来（标题写数量或状态）
+      '<div class="row" style="justify-content:flex-start">' + (cur && cur.kind === 'L' ? '<button class="gbtn" data-d="words">这一周的词单（换词）</button>' : '') +
+      '<button class="gbtn" data-d="cfg">改这个学生的设置</button><button class="gbtn" data-d="link">专属链接</button></div>' +
+      '<div class="folds">' +
+      foldHTML('det.more', false, '更多操作', '打印、改名字/备注/停用',
+        '<div class="row" style="justify-content:flex-start"><button class="gbtn" data-d="pweek">打印' + (cur && cur.kind === 'R' ? '本轮复习的词' : '本周词单') + '</button><button class="gbtn" data-d="perr">打印错词本</button><button class="gbtn" data-d="edit">改名字/备注/停用</button></div>') +   // 第 40 步：打印
+      foldHTML('det.adj', false, '调整这个学生 <small>只对这个学生、马上生效</small>', adjN + ' 项：延长 1 周' + (refill ? '、补发新词' : '') + '、下周新词数、手动放行' + (refill ? ' <span class="chip warn">这一周没有新词</span>' : ''),
+        '<div class="form"><div class="row"><span>' + esc(extTxt) + '</span><button class="gbtn" data-d="extend"' + (cur ? '' : ' disabled') + '>延长 1 周</button></div>' +
+        (refill ? '<div class="row"><span>' + (cur.check ? '<b>请核对：</b>旧记录分不清有没有给这个学生设过「下周暂停/减量」，这一周先没自动发词。确认要学的话，补发几个：' : '这一周没有新词（还没开考）。现在补发几个：') + '</span><span class="copyrow"><input id="refv" type="number" min="1" max="500" value="' + num(cur.weekly, 100) + '" style="width:80px" aria-label="补发几个新词"><button class="gbtn" data-d="refill">补发新词</button></span></div>' : '') +
+        '<div class="row"><span>设置下周新词数（只改下一个学新词周，遇回顾周顺延；上周的错词照常全部带上；0 ＝ 暂停新词）</span><span class="copyrow"><input id="cutv" type="number" min="0" max="500" value="' + num(s.next_cut ?? 50, 50) + '" style="width:80px" aria-label="下周新词数"><button class="gbtn" data-d="cut">设好</button></span></div>' +
+        '<div class="row"><span>把这一周最近交的那场记为及格（原分数保留）；以前的某一场在「每一周」表里点「记为及格」</span><button class="gbtn" data-d="pass">手动放行</button></div></div>') +
+      foldHTML('det.weeks', false, '每一周', weeks.length + ' 周' + (lastT ? ' · 最近一次：' + lastT : ''),
+        '<div class="scroll"><table class="t"><tr><th>周</th><th>开始</th><th>词数</th><th>练过</th><th>测验</th></tr>' +
+        (weeks.length ? weeks.map(w => '<tr><td>第 ' + num(w.no) + ' 周' + (w.kind === 'R' ? '（回顾）' : '') + (w.extended ? '（延长）' : '') + '</td><td>' + md(w.start) + '</td><td>' + (w.kind === 'L' ? '共 ' + num(w.n) + ((w.carry || w.extra) ? '（' + [w.carry ? '错词 ' + num(w.carry) : '', w.extra ? '追加 ' + num(w.extra) : ''].filter(Boolean).join('、') + '）' : '') : (w.carry ? '错词 ' + num(w.carry) : '—')) + '</td><td>' + (w.kind === 'L' ? num(w.done) : '—') + '</td><td>' +
+          ((w.tests || []).length ? w.tests.map(x => (KN[x.kind] || '') + ' ' + (x.done ? num(x.score) + '/' + num(x.total) + ' ' + (x.passed ? '<span class="chip ok">及格</span>' : x.manual ? '<span class="chip">放行</span>' : '<span class="chip bad">没及格</span> <button class="link" data-tpass="' + esc(x.id) + '">记为及格</button>') : '考到一半')).join('<br>') : '没考') + '</td></tr>').join('') : '<tr><td colspan="5" class="muted">' + (s.active ? '还没有开始的周（开课日之前不生成）' : '没有记录') + '</td></tr>') +
+        '</table></div>') +
+      foldHTML('det.wrong', false, '错过的词', wrong.length + ' 个' + (wrong.length > 60 ? '（下面显示错得最多的 60 个）' : ''),
+        wrong.length ? '<div class="list">' + wrong.slice(0, 60).map(x => '<div class="it"><span><span class="nm" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r) + '</span></span><span class="sub">' + esc(x.m) + ' · 错 ' + num(x.times) + ' 次' + (x.st === 'correct' ? ' · 后来对了' : '') + (x.off ? ' · 已停用' : '') + '</span></div>').join('') + '</div>' : '<div class="muted">还没有。</div>') +
+      (det.chk && typeof det.chk === 'object' ? foldHTML('det.chk', false, '一个月后抽查（试点）', (det.chk.on ? '开着' : '关着') + (num(det.chk.n) ? ' · 抽查了 ' + num(det.chk.n) + ' 个，忘了 ' + num(det.chk.forgot) + ' 个' : ''), chkHTML(det.chk)) : '') +   // 第 39 步
+      foldHTML('det.drill', false, '刷题 <small>不算成绩、不进错词本</small>', '<span id="dsum">正在读取……</span>', '<div id="dstat" class="muted">正在读取……</div>') +
+      (has37() ? foldHTML('det.types', false, '各题型正确率', '正式测验、刷题分开看', '<div class="small muted">和学生「进度」页看到的一样</div><div id="tstat" class="muted">正在读取……</div>') : '') +
+      '</div>');
     m.classList.add('det');
     drillStats(sid, m, seq);
     if (has37()) typeStats(sid, m, seq);   // 第 37 步
@@ -217,6 +231,7 @@ const Adm = (() => {
         acting = true; busy(b, true);
         let r = null; try { r = await rpc('adm_word', { act: 'print', a: { sid, kind: d === 'perr' ? 'err' : 'week' } }, { obj: true, timeout: 30000 }); } catch (er) { toast(wdErr(er)); }
         acting = false; busy(b, false);
+        if (m.isConnected) try { b.focus({ preventScroll: true }); } catch (er) {}   // 11-27：等回复时按钮暂时不能点、焦点丢了：放回这个按钮（打印对话框关掉以后焦点回到这里）
         if (!r || !m.isConnected || seq !== detailSeq) return;
         if (r.state !== 'ok') { toast(r.msg || '没有可以打印的词'); return; }
         const wk = r.week || {}, nOff = num(r.off);
@@ -254,10 +269,12 @@ const Adm = (() => {
     let r = null, err = null;
     try { r = await rpc('adm_stu_op', { sid, act: 'drill', a: {} }, { obj: true }); } catch (e) { err = e; }
     const el = m.querySelector('#dstat'); if (!el || seq !== detailSeq || !m.isConnected) return;
-    if (err) { el.textContent = '没读到（' + err.message + '）'; return; }
+    const sm = m.querySelector('#dsum'), sum = t => { if (sm) sm.textContent = t; };   // 11-27：折叠块标题上写一句
+    if (err) { el.textContent = '没读到（' + err.message + '）'; sum('没读到'); return; }
     const pc = (a, b) => num(b) ? Math.round(num(a) * 100 / num(b)) + '%' : '—';
     const d7 = r.d7 || {}, d30 = r.d30 || {}, ty = r.types || {}, top = Array.isArray(r.top) ? r.top : [];
-    if (!num(r.n)) { el.textContent = '还没刷过题。'; return; }
+    if (!num(r.n)) { el.textContent = '还没刷过题。'; sum('还没刷过题'); return; }
+    sum('一共 ' + num(r.n) + ' 题，正确率 ' + pc(r.right, r.n));
     el.classList.remove('muted');
     el.innerHTML = '<div class="stats"><div class="stat"><b>' + num(r.n) + '</b><span>一共刷的题</span></div><div class="stat"><b>' + pc(r.right, r.n) + '</b><span>正确率</span></div><div class="stat"><b>' + num(d7.n) + '</b><span>最近 7 天（正确率 ' + pc(d7.right, d7.n) + '）</span></div></div>' +
       '<div class="small muted">最近 30 天 ' + num(d30.n) + ' 题，正确率 ' + pc(d30.right, d30.n) + (r.last ? ' · 最后一次 ' + stamp(r.last) : '') + '</div>' +
@@ -566,12 +583,16 @@ const Adm = (() => {
   // ── 改动记录 ──
   function logHTML() {
     if (!D.logs.length) return '<div class="box"><h2>还没有改动记录</h2></div>';
-    return '<div class="box"><h2>改动记录 <small>最近 200 条</small></h2><div class="log">' + D.logs.map(x => {
+    const one = x => {
       const its = Array.isArray(x.items) ? x.items : [];
       const tail = x.eff ? '（' + md(x.eff) + '起生效）' : '';
       if (!its.length) return '<div><time>' + stamp(x.at) + '</time><span>' + esc(x.txt) + tail + '</span></div>';
       return '<div><time>' + stamp(x.at) + '</time><details' + (its.length === 1 ? ' open' : '') + '><summary>' + esc(x.txt) + tail + '</summary><ul>' + its.map(i => '<li>' + esc(i) + '</li>').join('') + '</ul></details></div>';
-    }).join('') + '</div></div>';
+    };
+    // 11-27：先列最近 30 条，更早的收进下面的折叠块
+    const N = 30, top = D.logs.slice(0, N), old = D.logs.slice(N);
+    return '<div class="box"><h2>改动记录 <small>最近 ' + D.logs.length + ' 条（最多留 200 条）</small></h2><div class="log">' + top.map(one).join('') + '</div>' +
+      (old.length ? foldHTML('log.old', false, '更早的改动', old.length + ' 条（' + md(old[old.length - 1].at) + '～' + md(old[0].at) + '）', '<div class="log">' + old.map(one).join('') + '</div>') : '') + '</div>';
   }
 
   // ── 题目难度页（第 36 步）：各档星级分布、够数的题、星级和初始不一样的题；可以马上重算 ──
@@ -695,7 +716,7 @@ const Adm = (() => {
       '<div class="muted small">词「' + esc(r.sent.w) + '」 · 理由：' + esc(r.reason || '（没写）') + ' · ' + esc(r.who) + ' · ' + stamp(r.at) + ' · 这句一共被报 ' + num(r.sent.reports) + ' 次</div>' +
       '<div class="row" style="justify-content:flex-start;gap:8px"><button type="button" class="gbtn" data-xa="hide" data-id="' + esc(r.sent.id) + '">隐藏这句</button><button type="button" class="gbtn" data-xa="ok" data-id="' + esc(r.id) + '">没问题</button></div></div>').join('') : '<div class="muted">没有。</div>') + pager + '</section>';
     const HD = EXA.hidden || [];
-    if (HD.length) h += '<section class="box exl"><h2>隐藏的句子 <small>最近 30 条</small></h2>' + HD.map(x => '<div class="it">' + exaSent(x) + '<div class="row" style="justify-content:flex-start"><span class="muted small">词「' + esc(x.w) + '」</span><button type="button" class="gbtn" data-xa="show" data-id="' + esc(x.id) + '">恢复</button></div></div>').join('') + '</section>';
+    if (HD.length) h += secFold('ex.hidden', false, '<h2>隐藏的句子 <small>最近 30 条</small></h2>', HD.length + ' 句，点开可以恢复', 'exl') + HD.map(x => '<div class="it">' + exaSent(x) + '<div class="row" style="justify-content:flex-start"><span class="muted small">词「' + esc(x.w) + '」</span><button type="button" class="gbtn" data-xa="show" data-id="' + esc(x.id) + '">恢复</button></div></div>').join('') + '</details></section>';   // 11-27：收起来
     // 试生成
     const sg = (id, cur, opts) => '<div class="seg" role="group" id="' + id + '">' + opts.map(([v, n]) => '<button type="button" data-v="' + v + '" aria-pressed="' + (cur === v) + '">' + n + '</button>').join('') + '</div>';
     const held = !!exT.rid && exT.ridFor === exSig();   // 上一次结果不明：按钮只按原编号查询
@@ -724,14 +745,14 @@ const Adm = (() => {
     h += '</section>';
     // 价格
     const PR = EXA.prices || [];
-    h += '<section class="box"><h2>价格 <small>每百万 token、每千次搜索（美元）；按「哪家＋模型＋生效日期」，用当天以前最新的一行</small></h2><div class="extw"><table class="extbl"><tr><th>哪家</th><th>模型</th><th>生效</th><th>输入</th><th>缓存读</th><th>缓存写</th><th>输出</th><th>搜索</th></tr>' +
+    h += secFold('ex.price', false, '<h2>价格 <small>每百万 token、每千次搜索（美元）；按「哪家＋模型＋生效日期」，用当天以前最新的一行</small></h2>', PR.length + ' 行；在这里填新价格') + '<div class="extw"><table class="extbl"><tr><th>哪家</th><th>模型</th><th>生效</th><th>输入</th><th>缓存读</th><th>缓存写</th><th>输出</th><th>搜索</th></tr>' +
       PR.map(x => '<tr><td>' + PN(x.provider) + '</td><td>' + esc(x.model) + '</td><td>' + esc(x.eff_date) + '</td><td>' + num(x.in_per_m) + '</td><td>' + num(x.cached_per_m) + '</td><td>' + num(x.cwrite_per_m) + '</td><td>' + num(x.out_per_m) + '</td><td>' + num(x.search_per_k) + '</td></tr>').join('') + '</table></div>' +
       '<div class="muted small">正在生成的调用用的那一版价格不能改；要改价就填一个新的生效日期。输入、输出要大于 0。</div>' +
       '<form class="form" id="xpf"><div class="row" style="flex-wrap:wrap;gap:8px"><label>哪家<select name="provider"><option value="openai">OpenAI</option><option value="anthropic">Claude</option></select></label><label>模型<input name="model" maxlength="64" required></label><label>生效日期<input name="eff" type="date"></label></div>' +
-      '<div class="row" style="flex-wrap:wrap;gap:8px"><label>输入<input name="in" type="number" step="0.01" min="0" required></label><label>缓存读<input name="cached" type="number" step="0.01" min="0" required></label><label>缓存写<input name="cwrite" type="number" step="0.01" min="0" required></label><label>输出<input name="out" type="number" step="0.01" min="0" required></label><label>每千次搜索<input name="search" type="number" step="0.01" min="0" required></label></div><button class="btn">保存这一行价格</button></form></section>';
+      '<div class="row" style="flex-wrap:wrap;gap:8px"><label>输入<input name="in" type="number" step="0.01" min="0" required></label><label>缓存读<input name="cached" type="number" step="0.01" min="0" required></label><label>缓存写<input name="cwrite" type="number" step="0.01" min="0" required></label><label>输出<input name="out" type="number" step="0.01" min="0" required></label><label>每千次搜索<input name="search" type="number" step="0.01" min="0" required></label></div><button class="btn">保存这一行价格</button></form></details></section>';   // 11-27：价格、最近 20 次调用收起来
     const RC = EXA.recent || [];
-    if (RC.length) h += '<section class="box"><h2>最近 20 次调用</h2><div class="extw"><table class="extbl"><tr><th>时间</th><th>哪家</th><th>步骤</th><th>结果</th><th>花费</th><th>预留</th><th></th></tr>' +
-      RC.map(c => '<tr><td>' + stamp(c.at) + '</td><td>' + PN(c.provider) + '</td><td>' + esc(STEPN[c.step] || c.step) + '</td><td>' + esc(c.swept ? '待对账（先按预留额记）' : CALLN[c.status] || c.status) + '</td><td>' + money(c.cost) + '</td><td>' + money(c.reserved) + '</td><td>' + (c.test ? '测试' : '') + (c.err ? ' ' + esc(c.err) : '') + '</td></tr>').join('') + '</table></div></section>';
+    if (RC.length) h += secFold('ex.recent', false, '<h2>最近 20 次调用</h2>', RC.length + ' 次') + '<div class="extw"><table class="extbl"><tr><th>时间</th><th>哪家</th><th>步骤</th><th>结果</th><th>花费</th><th>预留</th><th></th></tr>' +
+      RC.map(c => '<tr><td>' + stamp(c.at) + '</td><td>' + PN(c.provider) + '</td><td>' + esc(STEPN[c.step] || c.step) + '</td><td>' + esc(c.swept ? '待对账（先按预留额记）' : CALLN[c.status] || c.status) + '</td><td>' + money(c.cost) + '</td><td>' + money(c.reserved) + '</td><td>' + (c.test ? '测试' : '') + (c.err ? ' ' + esc(c.err) : '') + '</td></tr>').join('') + '</table></div></details></section>';
     return h;
   }
   async function exaAct(a) {
@@ -817,8 +838,10 @@ const Adm = (() => {
       '<div class="box"><div class="row"><h2 class="lh">表格导入 <small>一次最多 500 行</small></h2><button type="button" class="btn" data-wa="imp">导入表格…</button></div>' +
       '<div class="small muted">先预览：新增几个、更新几个、哪几行有错；确认后整批写入（有一行出错就一行都不写）。更新已有的词只改中文、例句中文、小提示；新增的词没有读音、没有 JLPT 题，先列在下面「待补」里。</div></div>' +
       '<div class="box" id="wdtodo">' + wdTodoHTML() + '</div>' +
-      '<div class="box" id="wdlog">' + wdLogHTML() + '</div>';
+      // 11-27：最近的改动收起来（标题上写几条）；点开再看
+      secFold('wd.log', false, '<h2>最近的改动 <small>谁、什么时候、改前 → 改后（最近 50 条）</small></h2>', '<span id="wdlogn">' + wdLogN() + '</span>') + '<div id="wdlog">' + wdLogHTML() + '</div></details></section>';
   }
+  const wdLogN = () => WD && WD.logErr ? '没读到' : WD && WD.log ? (Array.isArray(WD.log.rows) && WD.log.rows.length ? WD.log.rows.length + ' 条' : '还没有改动') : '正在读取……';
   function wdResHTML() {
     const r = WD.res;
     if (WD.err) return '<div class="warnbox">' + esc(WD.err) + (WD.err === NO40 ? '' : ' <button type="button" class="gbtn" data-wa="refind">再试一次</button>') + '</div>';
@@ -869,7 +892,7 @@ const Adm = (() => {
   }
   function wdLogHTML() {
     const L = WD && WD.log, rows = L && Array.isArray(L.rows) ? L.rows : [];
-    const h = '<h2>最近的改动 <small>谁、什么时候、改前 → 改后（最近 50 条）</small></h2>';
+    const h = '';   // 11-27：标题移到折叠块的开关上
     if (WD && WD.logErr) return h + '<div class="warnbox">' + esc(WD.logErr) + '</div>';
     if (!L) return h + '<div class="muted">正在读取……</div>';
     return h + (rows.length ? '<div class="wdlog">' + rows.map(x => logLine(x, true)).join('') + '</div>' : '<div class="muted">还没有改动。</div>');
@@ -880,6 +903,7 @@ const Adm = (() => {
     if (my !== lgSeq || tab !== 'wd') return;
     WD.log = err ? null : r; WD.logErr = err ? wdErr(err) : null;
     const el = $('wdlog'); if (el) el.innerHTML = wdLogHTML();
+    const ln = $('wdlogn'); if (ln) ln.textContent = wdLogN();
   }
   function wdEnter() { wdInit(); wdTodo(); wdLog(); if (WD.q || WD.lv || WD.st !== 'all') wdFind(); }
   function wdLeave() { wdSeq++; tdSeq++; lgSeq++; wmSeq++; if (WD) WD.busy = false; }   // 还没回来的都作废
@@ -1106,6 +1130,43 @@ const Adm = (() => {
   const sw = (k, label) => '<button type="button" class="sw" role="switch" id="f-' + k + '" aria-label="' + label + '"></button>';
   const seg = (id, label, opts) => '<div class="seg" role="group" aria-label="' + label + '" id="' + id + '">' + opts.map(([v, n]) => '<button type="button" data-v="' + v + '" aria-pressed="false">' + n + '</button>').join('') + '</div>';
   const hint = t => '<span class="inh">' + t + '</span>';
+  // 11-27：设置页每一块的标题就是折叠开关。默认只开「学习量」「各档怎么学」「拓展例句」（拓展例句管花钱，进来就看得到）；
+  // 标题下面一行写现在的设置、单独设了几项、改了几处没保存（refresh 里更新，见 secStat）
+  const SEC_OPEN = ['bxAmt', 'bxLv', 'bxEx'];
+  const secA = (id, h2, attrs) => '<section class="box" id="' + id + '"' + (attrs || '') + '><details class="fold sec"' + foldAttr('cfg.' + id, SEC_OPEN.includes(id)) + '><summary>' + h2 + '<span class="fst" id="fs-' + id + '"></span></summary>';
+  const secZ = '</details></section>';
+  const onOff = v => v ? '开' : '关';
+  const SECST = {
+    bxAmt: e => '每周 ' + num(e.weekly) + ' 个新词，学 ' + num(e.days) + ' 天' + (e.addOn ? '；学完可以再来一组 ' + num(e.addN) + ' 个' : ''),
+    bxLv: e => lvText(e, { short: true }),
+    bxSrs: e => e.srsOn ? '开着，每天最多复习 ' + num(e.srsN) + ' 个' : '关着',
+    bxChk: e => e.chkOn ? '开着，每天最多抽查 ' + num(e.chkN) + ' 个' : '关着',
+    bxCyc: e => '先学 ' + num(e.learnW) + ' 周新词' + (num(e.revW) ? '，再回顾 ' + num(e.revW) + ' 周' : '，不要回顾周'),
+    bxWk: e => '及格线 ' + num(e.pass) + '%；' + (e.instant ? '答题时当场判对错' : '交卷后再看对错'),
+    bxRev: e => num(e.revW) === 0 ? '现在没有回顾周' : '抽 ' + num(e.revN) + ' 个词来考，及格线 ' + num(e.revPass) + '%',
+    bxRg: e => num(e.rvDays) ? '分 ' + num(e.rvDays) + ' 天复习完' : '不分天',
+    bxQ: e => e.qOn ? '开着，每 ' + num(e.qEvery) + ' 周考一次' : '关着',
+    bxY: e => e.yOn ? '开着，每 ' + num(e.yEvery) + ' 周考一次' : '关着',
+    bxMrg: e => fmt('merge', e.merge),
+    bxPz: e => '答错时格子变暗：' + onOff(e.dim),
+    bxDrill: e => e.drillOn ? '开放，每次最多 ' + num(e.drillMax) + ' 题' : '关着',
+    bxRetest: e => num(e.retestN) ? '最近交卷的 ' + num(e.retestN) + ' 场可以再做' : '不开放',
+    bxShow: e => e.starShow ? '显示' : '不显示',
+    bxWl: e => '全部词表：' + (e.wlOn ? '开放' : '关着'),
+    bxLq: e => '听音选意思：' + onOff(e.acOn) + '；随身听：' + onOff(e.lsOn) + '；快刷：' + onOff(e.qfOn),
+    bxStar: e => '按真实答对率自动修正：' + onOff(e.starAuto),
+    bxEx: e => (e.exOn ? '开着' : '关着') + '；知识例句：' + (WHO[e.exWhoK] || '—') + '；时事例句：' + (WHO[e.exWhoN] || '—'),
+  };
+  // 每一块标题下面那一行：现在的设置＋（单个学生、方案）单独设了几项＋改了几处还没保存
+  function secStat(e, ch) {
+    const chg = new Set(ch.map(x => x[0])), o = scope === 'global' ? null : ov();
+    document.querySelectorAll('main section.box > details.fold.sec').forEach(d => {
+      const sec = d.parentElement, el = $('fs-' + sec.id); if (!el) return;
+      const ks = [...sec.querySelectorAll('.field[data-key]')].map(f => f.dataset.key); if (sec.id === 'bxLv') ks.push('ratio');
+      const nCh = ks.filter(k => chg.has(k)).length, nOv = o ? ks.filter(k => k in o).length : 0;
+      el.innerHTML = esc(SECST[sec.id] ? SECST[sec.id](e) : '') + (nOv ? ' <span class="chip">' + (scope === 'tpl' ? '方案自己设了 ' : '单独设了 ') + nOv + ' 项</span>' : '') + (nCh ? ' <span class="chip d">改了 ' + nCh + ' 处，还没保存</span>' : '');
+    });
+  }
 
   function scopeBar() {
     const t = TPL();
@@ -1144,10 +1205,10 @@ const Adm = (() => {
       '<div class="note">改好点下面「保存」。<b>学生已经开始的这一周照旧</b>，从各自的下一周起用新设置（延长中的那一周也照旧）。</div></section>' +
       (scope === 'stu' ? '<section class="box"><h2>这个学生用哪个方案</h2><div class="field" style="border-top:0"><div class="fl"><span>方案</span><span class="inh">换方案后，没单独改过的项会跟着新方案走；学过的词和成绩都保留</span></div>' + seg('c-tplOf', '方案', D.plans.map(p => [p.key, esc(p.name)])) + '</div>' +
         (rq ? '<div class="note rqbar"><span>学生申请换成「<b>' + esc(rq.tname) + '</b>」' + (rq.reason ? '，理由：' + esc(rq.reason) : '（没写理由）') + ' · ' + stamp(rq.at) + '</span><span class="rqb"><button type="button" class="gbtn" data-rq="' + esc(rq.id) + '" data-ok="1">同意</button><button type="button" class="gbtn" data-rq="' + esc(rq.id) + '" data-ok="0">不同意</button></span></div>' : '') + '</section>' : '') +
-      '<section class="box"><h2>学习量</h2>' + fld('weekly', '每周新词数', stepHTML('weekly')) + fld('days', '每周学几天', stepHTML('days')) +
+      secA('bxAmt', '<h2>学习量</h2>') + fld('weekly', '每周新词数', stepHTML('weekly')) + fld('days', '每周学几天', stepHTML('days')) +
       fld('addOn', '学完可以「再来一组」', sw('addOn', '学完可以再来一组'), hint('追加的词算进本周，一起考')) + fld('addN', '一组几个', stepHTML('addN')) +
-      fld('order', '本周词单顺序', seg('c-order', '本周词单顺序', [['mix', '打乱'], ['lv', '按档从易到难']]), hint('打乱：各档的词、上周错词混在一起，同一周里顺序固定。按档：上周错词在前，新词从 N5 到 N1、常用的在前')) + '</section>' +
-      '<section class="box" id="bxLv"><h2>' + (scope === 'tpl' ? '方案「' + esc(t[tplKey] || '') + '」：各档怎么学' : '各档怎么学') + ' <small>' + LV.map((l, i) => l + ' ' + CN[i]).join(' · ') + '</small></h2>' +
+      fld('order', '本周词单顺序', seg('c-order', '本周词单顺序', [['mix', '打乱'], ['lv', '按档从易到难']]), hint('打乱：各档的词、上周错词混在一起，同一周里顺序固定。按档：上周错词在前，新词从 N5 到 N1、常用的在前')) + secZ +
+      secA('bxLv', '<h2>' + (scope === 'tpl' ? '方案「' + esc(t[tplKey] || '') + '」：各档怎么学' : '各档怎么学') + ' <small>' + LV.map((l, i) => l + ' ' + CN[i]).join(' · ') + '</small></h2>') +
       (scope === 'tpl' ? '<div class="muted">方案还可以单独设下面的「刷题」「整卷再做一遍」「题目上方的档和难度星级」' + (has37() ? '「全部词表和题型表现」' : '') + (has38() ? '「听力、随身听、快刷」' : '') + (has39() ? '「一个月后抽查」「回顾周每天的目标」' : '') + '；其他设置都跟「所有学生的默认」，要单独调某个学生请到「单个学生」。</div><div class="copyrow"><button type="button" class="gbtn" id="copyTpl">复制成新方案</button><button type="button" class="gbtn" id="renTpl">改名</button></div>' : '') +
       fld('mode', '学法', seg('c-mode', '学法', [['mix', '按比例混合'], ['step', '逐级'], ['only', '只学某几档']])) +
       '<div class="small muted" id="lvNote" hidden></div>' +
@@ -1155,18 +1216,18 @@ const Adm = (() => {
       LV.map((l, i) => '<div class="lv"><b>' + l + '</b><div class="barr"><i id="bar' + i + '"></i></div><div class="step"><button type="button" data-r="' + i + '" data-dd="-1" aria-label="' + l + ' 减少">−</button><input id="r' + i + '" type="number" min="0" max="100" aria-label="' + l + ' 百分比"><span class="u">%</span><button type="button" data-r="' + i + '" data-dd="1" aria-label="' + l + ' 增加">+</button></div><span class="n" id="rn' + i + '"></span></div>').join('') +
       '</div><div class="sumline" id="ratioSum"><span id="ratioTxt"></span><button type="button" class="gbtn" id="ratioReset">恢复系统初始比例（' + DEF_RATIO.join('/') + '）</button></div></div>' +
       '<div class="sub2" id="pStep">' + fld('start', '从哪一档开始', seg('c-start', '从哪一档开始', LV.map(l => [l, l]))) + '<div class="note" id="stepTxt"></div></div>' +
-      '<div class="sub2" id="pOnly">' + fld('only', '学哪几档', '<div class="checks" id="c-only">' + LV.map((l, i) => '<button type="button" class="ck" data-v="' + l + '" aria-pressed="false">' + l + ' · ' + CN[i] + '</button>').join('') + '</div>') + '<div class="note" id="onlyTxt"></div></div></section>' +
-      '<section class="box" id="bxSrs"><h2>每天复习 <small>按遗忘曲线：学过的词隔 1、2、4、7、15 天回来一次</small></h2>' + fld('srsOn', '要每天复习', sw('srsOn', '要每天复习')) + fld('srsN', '每天最多复习几个', stepHTML('srsN'), hint('到期的词比这个多时，按到期早的先复习，剩下的明天接着来' + (has39() ? '。开了「一个月后抽查」时，抽查的词也算在这里面' : ''))) + '</section>' +
-      (has39() ? '<section class="box" id="bxChk"><h2>一个月后抽查（试点） <small id="chkOff"></small></h2>' +
+      '<div class="sub2" id="pOnly">' + fld('only', '学哪几档', '<div class="checks" id="c-only">' + LV.map((l, i) => '<button type="button" class="ck" data-v="' + l + '" aria-pressed="false">' + l + ' · ' + CN[i] + '</button>').join('') + '</div>') + '<div class="note" id="onlyTxt"></div></div>' + secZ +
+      secA('bxSrs', '<h2>每天复习 <small>按遗忘曲线：学过的词隔 1、2、4、7、15 天回来一次</small></h2>') + fld('srsOn', '要每天复习', sw('srsOn', '要每天复习')) + fld('srsN', '每天最多复习几个', stepHTML('srsN'), hint('到期的词比这个多时，按到期早的先复习，剩下的明天接着来' + (has39() ? '。开了「一个月后抽查」时，抽查的词也算在这里面' : ''))) + secZ +
+      (has39() ? secA('bxChk', '<h2>一个月后抽查（试点） <small id="chkOff"></small></h2>') +
         '<div class="muted small">每天复习里 5 次都「会了」的词就「毕业」了，以后不再出现。打开这一项：毕业满一段时间的词，每天抽几个放进「今天复习」，卡上标「抽查」。保存后马上生效；建议先在「单个学生」或方案里给几个学生试用。</div>' +
         fld('chkOn', '一个月后抽查', sw('chkOn', '一个月后抽查'), hint('默认关。抽查不算新学、不占每周新词数；算在「今天复习」里，也算打卡')) +
         fld('chkDays', '复习毕业满几天开始抽查', stepHTML('chkDays'), hint('默认 30 天')) +
         fld('chkN', '每天最多抽查几个', stepHTML('chkN'), hint('占「每天最多复习几个」里的名额：每天先留给抽查，剩下的给平常的复习。试用的学生建议把「每天最多复习几个」调高（加上每天抽查的个数），不然平常复习会变少')) +
         fld('chkMax', '抽查间隔最长几天', stepHTML('chkMax'), hint('抽查点「会了」：下次隔的天数翻倍（按默认是 30 → 60 → 90），达到这个数以后保持。改了这几项：已经排好的抽查日期保留，下次评分时才按新的间隔安排；还没抽查过的词按新的天数算第一次')) +
         fld('chkErr', '抽查忘了的进错词本', sw('chkErr', '抽查忘了的进错词本'), hint('点「不会」「不太确定」的词都回到每天复习、从第 1 次重新来。默认关＝不进错词本；开＝错的次数加 1、进错词本（错词本里写「一个月后抽查」）')) +
-        '<div class="note">学生详情里能看到抽查了几个、忘了几个。</div></section>' : '') +
-      '<section class="box"><h2>学习循环</h2>' + fld('learnW', '先学几周新词', stepHTML('learnW')) + fld('revW', '接着回顾几周', stepHTML('revW'), hint('填 0 就是不要回顾周')) + '</section>' +
-      '<section class="box"><h2>周测</h2><div class="field"><div class="fl"><span>考哪些词</span></div><span class="lock">本周词单里的全部词，不抽查（含追加的、带过来的错词）</span></div>' +
+        '<div class="note">学生详情里能看到抽查了几个、忘了几个。</div>' + secZ : '') +
+      secA('bxCyc', '<h2>学习循环</h2>') + fld('learnW', '先学几周新词', stepHTML('learnW')) + fld('revW', '接着回顾几周', stepHTML('revW'), hint('填 0 就是不要回顾周')) + secZ +
+      secA('bxWk', '<h2>周测</h2>') + '<div class="field"><div class="fl"><span>考哪些词</span></div><span class="lock">本周词单里的全部词，不抽查（含追加的、带过来的错词）</span></div>' +
       fld('untaught', '到周测时还没学的词', seg('c-untaught', '还没学的词', [['test', '照考'], ['next', '不考，挪到下周']])) +
       fld('pass', '及格线', stepHTML('pass')) +
       fld('types', '题型', '<div class="checks" id="c-types">' + TYPES.map(([v, nm]) => '<button type="button" class="ck" data-v="' + v + '" aria-pressed="false">' + nm + '</button>').join('') + '</div>', hint('每个词只考一题，从勾选的题型里随机出。前 5 种是 JLPT 考试题型（题库里出好的题）；这个词题库里没有的题型就换别的，都没有时出「看日语选中文」' + (has38() ? '。正式测验不出「听音选意思」（只在刷题、练习里出）' : ''))) +
@@ -1174,32 +1235,32 @@ const Adm = (() => {
       fld('whyT', '当场显示解析的题型', '<div class="checks" id="c-whyT">' + WHY.map(([v, nm]) => '<button type="button" class="ck" data-v="' + v + '" aria-pressed="false">' + nm + '</button>').join('') + '</div>', hint('勾上的题型，答完马上在选项下面显示解析。看日语选中文等 3 种简单题本来就没有解析。交卷后的错题解析照旧都有')) +
       (has36() ? fld('testFresh', '测验优先抽没练过的题', sw('testFresh', '测验优先抽没练过的题'), hint('防背题：同一个词有好几种题型时，正式测验先出这个学生在练习、刷题里没做过的那种；都做过就照常随机')) : '') +
       fld('carryFail', '没及格时，错词带到下周', sw('carryFail', '没及格时错词带到下周')) + fld('carryPass', '及格了但有错词，也带到下周', sw('carryPass', '及格了但有错词也带到下周')) +
-      fld('total', '带过去以后，下周学多少', seg('c-total', '下周学多少', [['A', '新词照旧＋错词'], ['B', '总数不变']])) + '<div class="note" id="totalTxt"></div></section>' +
-      '<section class="box" id="bxRev"><h2>回顾周 <small id="revOff"></small></h2>' + fld('revN', '抽多少个词来考', stepHTML('revN'), hint('学过的词不够时，有多少考多少')) +
-      fld('revMust', '前几周错过的词一定抽到', sw('revMust', '错过的词一定抽到'), hint('错词比上面的数还多时，全部考')) + fld('revPass', '及格线', stepHTML('revPass')) + '</section>' +
-      (has39() ? '<section class="box" id="bxRg"><h2>回顾周每天的目标 <small id="rgOff"></small></h2>' +
-        fld('rvDays', '回顾周「复习本轮」分几天复习完', stepHTML('rvDays'), hint('把这一轮要复习的词平均分到每天：学生页「本周任务」显示「今天的目标 N 个、已完成 M 个」。只是目标提示，不强制、不锁，做完可以接着往后做；回顾测照原规则。0＝不分天。保存后马上生效')) + '</section>' : '') +
-      '<section class="box" id="bxQ"><h2>季度测 <small>按设置出卷</small></h2>' + fld('qOn', '要季度测', sw('qOn', '要季度测')) + fld('qEvery', '每几周考一次', stepHTML('qEvery')) + fld('qN', '抽多少个词', stepHTML('qN')) + fld('qPass', '及格线', stepHTML('qPass')) + '</section>' +
-      '<section class="box" id="bxY"><h2>年测 <small>按设置出卷</small></h2>' + fld('yOn', '要年测', sw('yOn', '要年测')) + fld('yEvery', '每几周考一次', stepHTML('yEvery')) + fld('yN', '抽多少个词', stepHTML('yN')) + fld('yPass', '及格线', stepHTML('yPass')) + '</section>' +
-      '<section class="box"><h2>几场测验撞在同一周</h2>' + fld('merge', '怎么考', seg('c-merge', '同一周几场测验', [['merge', '合成一场'], ['both', '分开考']])) + '</section>' +
-      '<section class="box"><h2>拼图</h2>' + fld('dim', '回顾测答错时，格子变暗', sw('dim', '答错时格子变暗'), hint('关着＝不变暗，只记进错词本')) + '</section>' +
-      (has36() ? '<section class="box" id="bxDrill"><h2>刷题 <small>学生自己选词刷 JLPT 题；不算成绩、不进错词本、不算打卡。这一块保存后马上生效</small></h2>' +
+      fld('total', '带过去以后，下周学多少', seg('c-total', '下周学多少', [['A', '新词照旧＋错词'], ['B', '总数不变']])) + '<div class="note" id="totalTxt"></div>' + secZ +
+      secA('bxRev', '<h2>回顾周 <small id="revOff"></small></h2>') + fld('revN', '抽多少个词来考', stepHTML('revN'), hint('学过的词不够时，有多少考多少')) +
+      fld('revMust', '前几周错过的词一定抽到', sw('revMust', '错过的词一定抽到'), hint('错词比上面的数还多时，全部考')) + fld('revPass', '及格线', stepHTML('revPass')) + secZ +
+      (has39() ? secA('bxRg', '<h2>回顾周每天的目标 <small id="rgOff"></small></h2>') +
+        fld('rvDays', '回顾周「复习本轮」分几天复习完', stepHTML('rvDays'), hint('把这一轮要复习的词平均分到每天：学生页「本周任务」显示「今天的目标 N 个、已完成 M 个」。只是目标提示，不强制、不锁，做完可以接着往后做；回顾测照原规则。0＝不分天。保存后马上生效')) + secZ : '') +
+      secA('bxQ', '<h2>季度测 <small>按设置出卷</small></h2>') + fld('qOn', '要季度测', sw('qOn', '要季度测')) + fld('qEvery', '每几周考一次', stepHTML('qEvery')) + fld('qN', '抽多少个词', stepHTML('qN')) + fld('qPass', '及格线', stepHTML('qPass')) + secZ +
+      secA('bxY', '<h2>年测 <small>按设置出卷</small></h2>') + fld('yOn', '要年测', sw('yOn', '要年测')) + fld('yEvery', '每几周考一次', stepHTML('yEvery')) + fld('yN', '抽多少个词', stepHTML('yN')) + fld('yPass', '及格线', stepHTML('yPass')) + secZ +
+      secA('bxMrg', '<h2>几场测验撞在同一周</h2>') + fld('merge', '怎么考', seg('c-merge', '同一周几场测验', [['merge', '合成一场'], ['both', '分开考']])) + secZ +
+      secA('bxPz', '<h2>拼图</h2>') + fld('dim', '回顾测答错时，格子变暗', sw('dim', '答错时格子变暗'), hint('关着＝不变暗，只记进错词本')) + secZ +
+      (has36() ? secA('bxDrill', '<h2>刷题 <small>学生自己选词刷 JLPT 题；不算成绩、不进错词本、不算打卡。这一块保存后马上生效</small></h2>') +
         fld('drillOn', '开放刷题', sw('drillOn', '开放刷题'), hint('关着＝学生页不显示「刷题」页签，已经开着的刷题也不再判')) +
         fld('drillScopes', '学生可以选刷哪些词', '<div class="checks" id="c-drillScopes">' + DSC.map(([v, nm]) => '<button type="button" class="ck" data-v="' + v + '" aria-pressed="false">' + nm + '</button>').join('') + '</div>', hint('至少留一项。「我刷题时错过的」＝刷题时这个词最近一次做错；「全部」含学习范围里还没学的词')) +
         fld('drillMax', '每次最多几题', stepHTML('drillMax'), hint('学生可以选 10／20／50／100（不超过这个数），也可以自己填')) +
         fld('drillPer', '同一次同一个词最多几题', stepHTML('drillPer'), hint('先每个词出一题，词不够时才给同一个词出别的题型')) +
         fld('drillOrder', '默认出题方式', seg('c-drillOrder', '默认出题方式', DORD), hint('优先没做过的：先出学生没见过的题；只出做过的题：只从学生在刷题、练习、测验里答过的题里出（复习用）；全部随机：不管做没做过')) +
-        fld('drillOrders', '学生可以选的出题方式', '<div class="checks" id="c-drillOrders">' + DORD.map(([v, nm]) => '<button type="button" class="ck" data-v="' + v + '" aria-pressed="false">' + nm + '</button>').join('') + '</div>', hint('至少留一种；默认的那种关掉了，学生页先选开着的第一种')) + '</section>' : '') +
-      (has36() ? '<section class="box" id="bxRetest"><h2>整卷再做一遍 <small>正式测验交卷以后，整张卷子原题当练习再做一遍；不算成绩、不进错词本。保存后马上生效</small></h2>' +
-        fld('retestN', '最近交卷的几场可以整卷再做', stepHTML('retestN'), hint('0＝不开放；按交卷时间往前数')) + '</section>' : '') +
-      (has36() ? '<section class="box" id="bxShow"><h2>题目上方的档和难度星级 <small>测验、练习、刷题三处都按这一项；保存后马上生效</small></h2>' +
-        fld('starShow', '题目上方显示档和难度星级', sw('starShow', '题目上方显示档和难度星级'), hint('例如「N3 ★★★★」：星级是同一档里比，1 星最容易。关掉＝三处都不显示，刷题页也不再有「按难度」筛选（不管开不开刷题都能改）')) + '</section>' : '') +
-      (has37() ? '<section class="box" id="bxWl"><h2>全部词表和题型表现 <small>学生「进度」页里的词表、各题型正确率；保存后马上生效</small></h2>' +
+        fld('drillOrders', '学生可以选的出题方式', '<div class="checks" id="c-drillOrders">' + DORD.map(([v, nm]) => '<button type="button" class="ck" data-v="' + v + '" aria-pressed="false">' + nm + '</button>').join('') + '</div>', hint('至少留一种；默认的那种关掉了，学生页先选开着的第一种')) + secZ : '') +
+      (has36() ? secA('bxRetest', '<h2>整卷再做一遍 <small>正式测验交卷以后，整张卷子原题当练习再做一遍；不算成绩、不进错词本。保存后马上生效</small></h2>') +
+        fld('retestN', '最近交卷的几场可以整卷再做', stepHTML('retestN'), hint('0＝不开放；按交卷时间往前数')) + secZ : '') +
+      (has36() ? secA('bxShow', '<h2>题目上方的档和难度星级 <small>测验、练习、刷题三处都按这一项；保存后马上生效</small></h2>') +
+        fld('starShow', '题目上方显示档和难度星级', sw('starShow', '题目上方显示档和难度星级'), hint('例如「N3 ★★★★」：星级是同一档里比，1 星最容易。关掉＝三处都不显示，刷题页也不再有「按难度」筛选（不管开不开刷题都能改）')) + secZ : '') +
+      (has37() ? secA('bxWl', '<h2>全部词表和题型表现 <small>学生「进度」页里的词表、各题型正确率；保存后马上生效</small></h2>') +
         fld('wlOn', '开放全部词表', sw('wlOn', '开放全部词表'), hint('学生在「进度」页点「全部词表」：能筛选、搜索、遮住读音或中文自测，点一个词看这张卡（不算学习记录）。关着＝没有这个入口。正式测验开了考还没交卷时，词表自动暂停')) +
         fld('wlSee', '没学过的词能不能看', seg('c-wlSee', '没学过的词能不能看', WLSEE), hint('能看：学习范围里还没学的词也列出来（可以提前看）；只看学过的和本周的：没学过的词不列、也点不开')) +
         fld('tyDays', '各题型正确率的「最近几天」', stepHTML('tyDays'), hint('学生「进度」页、学生详情里的各题型正确率，可以在「最近这几天」和「全部」之间切换')) +
-        fld('tyMin', '一种题型少于几题标「题少，仅供参考」', stepHTML('tyMin')) + '</section>' : '') +
-      (has38() ? '<section class="box" id="bxLq"><h2>听力、随身听、快刷 <small>学生页的听音选意思、「进度」页的随身听和快刷；保存后马上生效</small></h2>' +
+        fld('tyMin', '一种题型少于几题标「题少，仅供参考」', stepHTML('tyMin')) + secZ : '') +
+      (has38() ? secA('bxLq', '<h2>听力、随身听、快刷 <small>学生页的听音选意思、「进度」页的随身听和快刷；保存后马上生效</small></h2>') +
         fld('acOn', '刷题、练习里出「听音选意思」', sw('acOn', '刷题、练习里出听音选意思'), hint('播单词读音、四个中文意思选一个（没有读音的词不出）。开：刷题可以选这个题型、组后小练也会出；关：刷题不能选，练习里不出，已经打开的还没答的听音题也不再判。正式测验（周测、回顾测、季度测、年测）一律不出听音题')) +
         fld('lsOn', '开放随身听', sw('lsOn', '开放随身听'), hint('连着播本周的词、错词本或词表筛出来的词：单词 → 例句 1 → 例句 2。不算学习记录、不算打卡。学生页得知这周开了考还没交卷就暂停（进随身听、快刷时和从别的应用切回来时会再核对一次）')) +
         fld('lsRep', '随身听每个词连着播几遍', stepHTML('lsRep'), hint('单词＋例句算一遍')) +
@@ -1209,13 +1270,13 @@ const Adm = (() => {
         fld('qfOn', '开放快刷', sw('qfOn', '开放快刷'), hint('一词一屏，点一下翻面，左右滑换词；「会／不会」只是学生给自己看的小标。不算学习记录、不进错词本、不算打卡')) +
         fld('qfFront', '快刷先看哪一面', seg('c-qfFront', '快刷先看哪一面', [['w', '写法'], ['m', '中文']])) +
         fld('qfOrder', '快刷顺序', seg('c-qfOrder', '快刷顺序', ORDS)) +
-        '<div class="note">随身听、快刷的几项是默认值：学生可以在自己的手机上改（只存在那个浏览器里），没改过的跟这里走。</div></section>' : '') +
-      (has36() ? '<section class="box" id="bxStar"' + (scope === 'global' ? '' : ' hidden') + '><h2>题目难度星级 <small>题目本身的规则，只在这里改</small></h2>' +
+        '<div class="note">随身听、快刷的几项是默认值：学生可以在自己的手机上改（只存在那个浏览器里），没改过的跟这里走。</div>' + secZ : '') +
+      (has36() ? secA('bxStar', '<h2>题目难度星级 <small>题目本身的规则，只在这里改</small></h2>', scope === 'global' ? '' : ' hidden') +
         fld('starAuto', '按真实答对率自动修正星级', sw('starAuto', '按真实答对率自动修正星级'), hint('关着＝一直用初始星级（Codex 逐题打的星）')) +
         fld('starN', '一道题有效作答多少次以后开始修正', stepHTML('starN'), hint('每个学生只算第一次作答（测验、练习、刷题都算）。这个数也是初始星级的分量：现在的星＝（初始星×这个数＋按答对率排的星×作答数）÷（这个数＋作答数），答的人越多越靠真实答对率')) +
         fld('starMinQ', '同一档至少几道够数的题才排位', stepHTML('starMinQ'), hint('够数的题在同一档里按答对率排：答对率最高的 10%＝1 星、接着 25%＝2 星、30%＝3 星、25%＝4 星、最难的 10%＝5 星（答对率一样的取中间名次；全都一样就不排）')) +
-        '<div class="note">这几项保存后马上重算一次；平时每天第一次打开管理端时也重算一次。哪些题的星级变了，在顶上的「题目难度」页看（那里也能马上重算）。</div></section>' : '') +
-      '<section class="box" id="bxEx"' + (scope === 'global' ? '' : ' hidden') + '><h2>拓展例句 <small>卡片背面的知识例句、时事例句，学生点了才生成</small></h2>' +
+        '<div class="note">这几项保存后马上重算一次；平时每天第一次打开管理端时也重算一次。哪些题的星级变了，在顶上的「题目难度」页看（那里也能马上重算）。</div>' + secZ : '') +
+      secA('bxEx', '<h2>拓展例句 <small>卡片背面的知识例句、时事例句，学生点了才生成</small></h2>', scope === 'global' ? '' : ' hidden') +
       fld('exOn', '拓展例句', sw('exOn', '拓展例句'), hint('关着＝学生页不再生成，也不给已有的句子')) +
       fld('exWhoK', '知识例句用哪家', seg('c-exWhoK', '知识例句用哪家', [['anthropic', '只用 Claude'], ['openai', '只用 OpenAI'], ['both', '两家轮流'], ['off', '关闭']]), hint('关闭＝学生页不显示「知识例句」按钮（管理端试生成照样能用）')) +
       fld('exWhoN', '时事例句用哪家', seg('c-exWhoN', '时事例句用哪家', [['openai', '只用 OpenAI'], ['anthropic', '只用 Claude'], ['both', '两家轮流'], ['off', '关闭']]), hint('两家轮流：本期剩余预算÷剩余天数多的先用；一家出错、额度用完时换另一家。关闭＝学生页不显示「时事例句」按钮（时事先关着，验收通过再开）')) +
@@ -1226,7 +1287,7 @@ const Adm = (() => {
       fld('exInflight', '全站同时生成几个', stepHTML('exInflight')) + fld('exNewsDays', '时事句多久换新', stepHTML('exNewsDays')) +
       fld('exNewsWin', '只用多少天内的新闻', stepHTML('exNewsWin')) + fld('exNoMatchDays', '找不到合适新闻后，隔几天再搜', stepHTML('exNoMatchDays')) +
       fld('exDomains', '时事新闻只搜这些网站', '<textarea id="f-exDomains" rows="6" spellcheck="false" aria-label="新闻只搜哪些网站"></textarea>', hint('每行一个，最多 20 个，例如 nhk.or.jp（不写 https:// 和路径）')) +
-      '<div class="note">每月预算、价格、用量、学生报错、试生成在顶上的「拓展例句」页。</div></section>';
+      '<div class="note">每月预算、价格、用量、学生报错、试生成在顶上的「拓展例句」页。</div>' + secZ;
     // 方案只管「各档怎么学」和刷题：别的块都不显示（元素留着，页面的其他计算照常）
     if (scope === 'tpl') h = h.replace(/<section class="box"(?! id="bx(?:Lv|Drill|Show|Retest|Wl|Lq|Chk|Rg)")/g, '<section class="box" hidden');   // 第 36 步起方案也管刷题、题目上方显示档和星级、整卷再做；第 37 步起也管词表和题型表现；第 38 步起也管听力、随身听、快刷
     return h;
@@ -1395,6 +1456,7 @@ const Adm = (() => {
     $('dirty').innerHTML = ch.length ? '有 <b>' + ch.length + '</b> 处改动没保存' + (bad ? '（' + esc(why) + ' <button type="button" class="link" data-jump="' + (badR ? 'pMix' : 'pOnly') + '">去改</button>）' : '') : '没有改动';
     $('save').disabled = !ch.length || bad; $('discard').disabled = !ch.length;
     $('discard').textContent = ch.length ? '放弃这 ' + ch.length + ' 处改动' : '放弃改动';
+    secStat(e, ch);   // 11-27：每一块标题下面那一行（收起来也看得到现在的设置、改了几处）
   }
   const dirtyCount = () => (tab === 'cfg' && draft && $('dirty')) ? changes().length : 0;
   function guard() { const n = dirtyCount(); if (n) { toast('先保存或放弃这 ' + n + ' 处改动，再切换'); return true; } return false; }
@@ -1495,7 +1557,15 @@ const Adm = (() => {
       m.querySelector('#rnf').addEventListener('submit', async ev => { ev.preventDefault(); try { await rpc('adm_plan_rename', { pk: tplKey, nm: m.querySelector('#rnn').value }); m.remove(); toast('已改名'); await reload(); } catch (er) { fail(er); } });
       return;
     }
-    const jp = t.closest('[data-jump]'); if (jp) { if (cfgCat !== 'all') { cfgCat = 'all'; applyCfgCat(); } const el = $(jp.dataset.jump); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    const jp = t.closest('[data-jump]'); if (jp) {
+      if (cfgCat !== 'all') { cfgCat = 'all'; applyCfgCat(); }
+      const el = $(jp.dataset.jump); if (!el) return;
+      foldReveal(el);   // 11-27：那一块收着就先打开（只这一次，不改记下的开合）
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const f = jp.dataset.jump === 'pMix' ? $('r0') : el.querySelector('#c-only .ck:not(:disabled)') || el.querySelector('input:not(:disabled), button:not(:disabled)');   // 焦点放到要改的第一个比例框／选档按钮（键盘、读屏接着就在这里）
+      if (f) try { f.focus({ preventScroll: true }); } catch (er) {}
+      return;
+    }
     if (!draft) return;
     const sb = t.closest('button[data-k]'); if (sb) { const k = sb.dataset.k, [, mn, mx, sp] = NUM[k], v = Math.min(mx, Math.max(mn, Math.round((num(eff()[k], mn) + sp * (+sb.dataset.dd)) * 10) / 10)); $('f-' + k).value = v; setVal(k, v); return; }
     const rr = t.closest('button[data-r]'); if (rr) { const i = +rr.dataset.r, r = eff().ratio.slice(); r[i] = Math.min(100, Math.max(0, r[i] + (+rr.dataset.dd))); $('r' + i).value = r[i]; setVal('ratio', r); return; }

@@ -72,7 +72,19 @@ function lvText(lv, opt = {}) {
   return t;
 }
 
-function toast(t, ms) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => el.hidden = true, ms || 3200); }   // ms：长的提示多停一会儿
+function toast(t, ms) { const el = $('toast'); el.textContent = t; el.hidden = false; toastPos(el); clearTimeout(toast.h); toast.h = setTimeout(() => el.hidden = true, ms || 3200); }   // ms：长的提示多停一会儿
+// 11-27：学生页手机宽度时，黑色提示放在屏幕下半截那条按钮条（翻面、评分、上一题／下一题……，贴底或者内容短时停在半路）的上面；没有按钮条照样式表的位置
+function toastPos(el) {
+  el.style.bottom = '';
+  const app = $('app'); if (!app || app.dataset.role !== 'stu' || window.innerWidth >= 960) return;
+  const tops = [...app.querySelectorAll('.bar, .dbar')].map(b => b.getBoundingClientRect()).filter(r => r.height && r.top < window.innerHeight && r.bottom > window.innerHeight * 0.55).map(r => r.top);
+  if (tops.length) el.style.bottom = Math.round(window.innerHeight - Math.min(...tops) + 10) + 'px';
+}
+// 复查第 3 轮：提示还在的时候滚动页面、改窗口大小：重新量一次按钮条的位置（每一帧最多一次）
+let toastRaf = 0;
+const toastRe = () => { if (toastRaf) return; toastRaf = requestAnimationFrame(() => { toastRaf = 0; const el = $('toast'); if (el && !el.hidden) toastPos(el); }); };
+window.addEventListener('scroll', toastRe, { passive: true });
+window.addEventListener('resize', toastRe);
 function fail(e) { toast(e && e.message ? e.message : '没成功，请再试一次'); }
 function busy(btn, on) { if (btn) { btn.disabled = on; } }
 
@@ -104,6 +116,28 @@ const NAV_PATHS = {
   log: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
 };
 const navIcon = k => NAV_PATHS[k] ? '<svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + NAV_PATHS[k] + '</svg>' : '';
+
+// 折叠块（11-27）：<details data-fold="名字" data-fdef="默认开不开">。开合记在这个浏览器（vocab_fold，读写都包 try/catch；读不到、存不了就按默认）。
+// 只记老师自己点（鼠标、触屏、键盘回车空格、读屏软件激活标题都会发 click）开、收的；页面重画、「去改」跳过去时打开的都不记（只算这一次）
+const FOLD_LS = 'vocab_fold';
+let foldMem = null;
+function foldRead() { let v = null; try { v = JSON.parse(localStorage.getItem(FOLD_LS) || 'null'); } catch (e) {} return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
+function foldGet(k, def) { if (!foldMem) foldMem = foldRead(); return typeof foldMem[k] === 'boolean' ? foldMem[k] : !!def; }
+function foldSet(k, v) {
+  if (!foldMem) foldMem = foldRead();
+  try { const all = foldRead(); all[k] = !!v; localStorage.setItem(FOLD_LS, JSON.stringify(all)); foldMem[k] = !!v; } catch (e) {}   // 存进浏览器了才记；存不了：只是眼前这一块开着／收着，下次画出来照默认（另一个标签页记的也留着）
+}
+// 折叠块开头的属性：data-fold、data-fdef、要不要 open
+const foldAttr = (k, def) => ' data-fold="' + esc(k) + '" data-fdef="' + (def ? 1 : 0) + '"' + (foldGet(k, def) ? ' open' : '');
+document.addEventListener('click', e => { const s = e.target && e.target.closest && e.target.closest('details[data-fold] > summary'); if (s) s.parentElement._fuser = Date.now(); }, true);   // 老师自己点了标题
+window.addEventListener('storage', e => { if (e.key === FOLD_LS || e.key === null) foldMem = null; });   // 复查第 2 轮：另一个标签页改了开合：这里记的作废，下次画面板时重读（眼前开着的块不动）
+document.addEventListener('toggle', e => {
+  const d = e.target; if (!d || !d.matches || !d.matches('details[data-fold]')) return;
+  const user = d._fuser && Date.now() - d._fuser < 1500; d._fuser = 0;
+  if (user) foldSet(d.dataset.fold, d.open);
+}, true);   // toggle 不冒泡：在捕获阶段听
+// 打开某个元素外面的折叠块（「去改」这类跳转用：只这一次打开，不改记下的开合）
+function foldReveal(el) { for (let d = el && el.closest('details[data-fold]'); d; d = d.parentElement && d.parentElement.closest('details[data-fold]')) if (!d.open) { d._fuser = 0; d.open = true; } }
 
 // 读音：audio/ja/<编号>.mp3、_1、_2
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
@@ -317,6 +351,27 @@ function exReport(sid) {
   });
 }
 
+// 11-27：弹窗开着时，只有最上面那一层能用键盘走到（底下的页面、下面一层弹窗都设成 inert；老浏览器不认 inert 就照旧，不报错）。
+// 只动自己设过的（data-minert）；弹窗一个个关掉时重新算，全关了就都放开
+function modalInert() {
+  const ms = [...document.body.children].filter(e => e.classList && e.classList.contains('modal')), top = ms[ms.length - 1] || null;
+  for (const e of document.body.children) {
+    if (e.tagName === 'SCRIPT' || e.id === 'toast') continue;   // 黑色提示不动（读屏照样念）
+    if (top && e !== top) { if (!e.inert) { try { e.inert = true; } catch (er) {} e.setAttribute('data-minert', '1'); } }
+    else if (e.hasAttribute('data-minert')) { try { e.inert = false; } catch (er) {} e.removeAttribute('inert'); e.removeAttribute('data-minert'); }
+  }
+}
+try { new MutationObserver(modalInert).observe(document.body, { childList: true }); } catch (e) {}   // 有的地方直接把弹窗拿掉（不走 close）：也重新算
+// 复查第 2 轮：最上面那一层弹窗（普通弹窗、打印预览都算）里 Tab 走到最后一个能点的会回到第一个，Shift+Tab 反过来；焦点不在这一层里时，Tab 进第一个、Shift+Tab 进最后一个
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Tab' || e.altKey || e.ctrlKey || e.metaKey) return;
+  const top = [...document.body.children].filter(x => x.classList && x.classList.contains('modal')).pop(); if (!top) return;
+  const shut = x => { for (let d = x.closest('details:not([open])'); d; d = d.parentElement && d.parentElement.closest('details:not([open])')) { const s = d.querySelector(':scope > summary'); if (!(s && s.contains(x))) return true; } return false; };   // 收着的折叠块里面的（标题除外）走不到
+  const fs = [...top.querySelectorAll('button, a[href], input, select, textarea, summary, [tabindex]')].filter(x => !x.disabled && x.tabIndex >= 0 && !shut(x) && x.getClientRects().length && getComputedStyle(x).visibility !== 'hidden' && (typeof x.checkVisibility !== 'function' || x.checkVisibility()));
+  if (!fs.length) { e.preventDefault(); return; }
+  const a = document.activeElement, i = fs.indexOf(a);
+  if (e.shiftKey ? i <= 0 : (i < 0 || i === fs.length - 1)) { e.preventDefault(); try { (e.shiftKey ? fs[fs.length - 1] : fs[0]).focus(); } catch (er) {} }
+}, true);
 // 弹窗：Esc 或点外面关闭（sticky 时不能点外面关），关了以后焦点回到原来的按钮
 function modal(html, opt = {}) {
   const back = document.activeElement;
@@ -324,11 +379,17 @@ function modal(html, opt = {}) {
   m.innerHTML = '<div class="card" role="dialog" aria-modal="true">' + html + '</div>';
   const box = m.firstChild, h2 = box.querySelector('h2');
   if (h2) { h2.id = 'dlg' + Date.now(); box.setAttribute('aria-labelledby', h2.id); }
-  const close = () => { if (!m.isConnected) return; m.remove(); if (opt.onClose) opt.onClose(); if (back && back.isConnected && back.focus) try { back.focus(); } catch (e) {} };
+  const close = () => {
+    if (!m.isConnected) return; m.remove(); modalInert(); if (opt.onClose) opt.onClose();
+    if (back && back !== document.body && back.isConnected && back.focus) try { back.focus(); } catch (e) {}
+    // 11-27：原来的按钮找不到了（打开时焦点不在按钮上、按钮没了）而下面还有一层弹窗：焦点放回那一层，键盘接着在里面
+    const a = document.activeElement, top = [...document.body.children].filter(e => e.classList && e.classList.contains('modal')).pop();
+    if (top && !(a && top.contains(a))) { const f = top.querySelector('button:not(:disabled), input:not(:disabled), select, textarea'); if (f) try { f.focus({ preventScroll: true }); } catch (e) {} }
+  };
   m.close = close;
   m.addEventListener('click', e => { if ((e.target === m && !opt.sticky) || e.target.closest('[data-close]')) close(); });
   m.addEventListener('keydown', e => { if (e.key === 'Escape' && !opt.sticky) { e.stopPropagation(); close(); } });
-  document.body.appendChild(m);
+  document.body.appendChild(m); modalInert();
   setTimeout(() => { const f = box.querySelector('[data-focus]') || box.querySelector('input,select,textarea,button'); if (f && m.isConnected) try { f.focus({ preventScroll: true }); } catch (e) {} }, 30);
   return m;
 }
@@ -584,7 +645,7 @@ async function printPreview(info, words, o) {
   ov.id = 'prt'; ov.className = 'modal prtv'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', '打印预览');
   ov.innerHTML = '<div class="prtbar"><button type="button" class="btn" data-pclose>返回</button><div class="prtinfo"><b>打印预览</b> <span id="prtn">正在排版……</span><small>A4 竖着打；点「打印」会另开一页来打印，纸上不会印出你的专属链接</small></div><button type="button" class="btn main" data-pprint disabled>打印</button></div>' +
     '<div class="prthold" hidden>正在核对……</div><div class="prtwrap"><div class="prtsz"><div class="prtpages"></div></div></div>';
-  document.body.appendChild(ov);
+  document.body.appendChild(ov); modalInert();
   document.documentElement.classList.add('prt-on');
   const pp = ov.querySelector('.prtpages'), pb = ov.querySelector('[data-pprint]');
   const fit = () => {
@@ -593,7 +654,7 @@ async function printPreview(info, words, o) {
     pp.style.transform = 'scale(' + s + ')'; sz.style.width = Math.floor(pw * s) + 'px'; sz.style.height = Math.ceil(ph * s) + 'px';
   };
   let holding = false, printing = false;
-  const close = () => { if (!ov.isConnected) return; unguard(); window.removeEventListener('resize', fit); ov.remove(); document.documentElement.classList.remove('prt-on'); if (back && back.isConnected && back.focus) try { back.focus(); } catch (e) {} };
+  const close = () => { if (!ov.isConnected) return; unguard(); window.removeEventListener('resize', fit); ov.remove(); modalInert(); document.documentElement.classList.remove('prt-on'); if (back && back.isConnected && back.focus) try { back.focus(); } catch (e) {} };
   const hold = on => { holding = on; ov.classList.toggle('hold', on); ov.querySelector('.prthold').hidden = !on; pb.disabled = on || !pp.firstElementChild; };
   const unguard = prtGuard(info, () => hold(true), () => hold(false), msg => { close(); toast(msg); if (info.onBlock) info.onBlock(); });
   ov.addEventListener('click', async e => {
