@@ -102,12 +102,13 @@ document.addEventListener('click', e => {
   try { localStorage.setItem('vocab_theme', th); } catch (er) {}
   document.querySelectorAll('[data-th]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.th === th)));
 });
+// 11-28 方案甲：学生的「今天」（study）用日历、「我的」（map）用人像（页签内部的 key 不变）
 const NAV_PATHS = {
-  study: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+  study: '<rect x="3.5" y="5" width="17" height="15.5" rx="3.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><circle cx="12" cy="15" r="1.3" fill="currentColor" stroke="none"/>',
   test: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
   drill: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
   err: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
-  map: '<path d="m8 3 4 8 5-5 5 15H2L8 3z"/>',
+  map: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="10" r="3.2"/><path d="M6.3 18.2c1.4-2 3.3-3 5.7-3s4.3 1 5.7 3"/>',
   stu: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   cfg: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.77 1.05 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   ex: '<path d="M12 3l1.9 5.8L20 10.7l-5.8 1.9L12 18.4l-2.2-5.8L4 10.7l6.1-1.9z"/>',
@@ -224,17 +225,21 @@ document.addEventListener('click', e => {
 });
 
 // 一张卡的背面（学习、错词本、管理端都用）
+// 11-28 方案甲：卡内分组——词头／意思＋中日同形词（mgrp，同一组上下两格）／有同一个汉字的词（三列格子）／例句组（exg，带「例句」小标题）／小提示／拓展例句。
+// 只多了两层包裹（mgrp、exg），原来每一块的 class、顺序、条件都不变（读音和写法一样时不写读音；没有例句就没有例句组；一个例句时只有「重播」）
 function cardBack(c, opt = {}) {
   let h = '<div class="head"><span class="w" lang="ja">' + esc(c.w) + '</span>' + (c.r !== c.w ? '<span class="r" lang="ja">' + esc(c.r) + '</span>' : '') + sayBtn(aud(c.id), '听单词发音') + (opt.chip || '') + '</div>';
-  h += '<div class="mean"><span class="pos">' + esc(c.p) + '</span>' + esc(c.m) + '</div>';
+  h += '<div class="mgrp"><div class="mean"><span class="pos">' + esc(c.p) + '</span>' + esc(c.m) + '</div>';
   if (c.trap) h += '<div class="trap"><div class="lab">中日同形词 · 别按中文理解</div><div>' + rb(c.trap) + '</div></div>';
-  if (c.rel && c.rel.length) h += '<div class="rel"><div class="lab">有同一个汉字的词</div><div class="relw">' + c.rel.map(x => '<span class="rw' + (x.me ? ' me' : '') + '" title="' + esc(x.m) + '"><b lang="ja">' + esc(x.w) + '</b><span lang="ja">' + esc(x.r) + '</span><i>' + esc(x.m) + '</i></span>').join('') + '</div><div class="small muted">深色的是你学过的</div></div>';
+  h += '</div>';
+  if (c.rel && c.rel.length) h += '<div class="rel"><div class="lab">有同一个汉字的词<small>有底色的是你学过的</small></div><div class="relw">' + c.rel.map(x => '<span class="rw' + (x.me ? ' me' : '') + '" title="' + esc(x.m) + '"><b lang="ja">' + esc(x.w) + '</b><span lang="ja">' + esc(x.r) + '</span><i>' + esc(x.m) + '</i></span>').join('') + '</div></div>';
   // 每个例句旁边：喇叭（点一次播一次＝重播）、「慢」（0.75 倍）；例句下面：连播两句、慢速连播、重播（这张卡上次播的，照原来的速度）
+  if ((c.ex || []).length) h += '<div class="exg"><div class="lab exh">例句</div>';
   (c.ex || []).forEach((e, j) => { h += '<div class="ex"><div class="jp" lang="ja">' + rb(e[0]) + '</div><div class="exb">' + sayBtn(aud(c.id, j + 1), '听例句 ' + (j + 1)) + slowBtn(aud(c.id, j + 1), '慢速听例句 ' + (j + 1)) + '</div><div class="zh">' + esc(e[1]) + '</div></div>'; });
   if ((c.ex || []).length) {
     const ss = c.ex.map((e, j) => aud(c.id, j + 1)).join(' '), nn = c.ex.length === 2 ? '两' : c.ex.length;
     h += '<div class="exa">' + (c.ex.length > 1 ? '<button type="button" class="gbtn" data-seq="' + esc(ss) + '">连播' + nn + '句</button><button type="button" class="gbtn" data-seq="' + esc(ss) + '" data-spd="' + SLOW + '">慢速连播</button>' : '') +
-      '<button type="button" class="gbtn" data-replay="' + esc(c.id) + '" aria-label="重播这张卡上次播的读音">重播</button></div>';
+      '<button type="button" class="gbtn" data-replay="' + esc(c.id) + '" aria-label="重播这张卡上次播的读音">重播</button></div></div>';
   }
   if (c.tip) h += '<div class="tip"><div class="lab">小提示</div><div>' + rb(c.tip) + '</div></div>';
   if (!opt.noEx) h += exBlock(c.id);   // 拓展例句（点了才生成）

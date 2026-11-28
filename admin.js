@@ -211,7 +211,7 @@ const Adm = (() => {
         wrong.length ? '<div class="list">' + wrong.slice(0, 60).map(x => '<div class="it"><span><span class="nm" lang="ja">' + esc(x.w) + '</span> <span class="muted" lang="ja">' + esc(x.r) + '</span></span><span class="sub">' + esc(x.m) + ' · 错 ' + num(x.times) + ' 次' + (x.st === 'correct' ? ' · 后来对了' : '') + (x.off ? ' · 已停用' : '') + '</span></div>').join('') + '</div>' : '<div class="muted">还没有。</div>') +
       (det.chk && typeof det.chk === 'object' ? foldHTML('det.chk', false, '一个月后抽查（试点）', (det.chk.on ? '开着' : '关着') + (num(det.chk.n) ? ' · 抽查了 ' + num(det.chk.n) + ' 个，忘了 ' + num(det.chk.forgot) + ' 个' : ''), chkHTML(det.chk)) : '') +   // 第 39 步
       foldHTML('det.drill', false, '刷题 <small>不算成绩、不进错词本</small>', '<span id="dsum">正在读取……</span>', '<div id="dstat" class="muted">正在读取……</div>') +
-      (has37() ? foldHTML('det.types', false, '各题型正确率', '正式测验、刷题分开看', '<div class="small muted">和学生「进度」页看到的一样</div><div id="tstat" class="muted">正在读取……</div>') : '') +
+      (has37() ? foldHTML('det.types', false, '各题型正确率', '正式测验、刷题分开看', '<div class="small muted">和学生「测验」页看到的一样</div><div id="tstat" class="muted">正在读取……</div>') : '') +
       '</div>');
     m.classList.add('det');
     drillStats(sid, m, seq);
@@ -1255,12 +1255,12 @@ const Adm = (() => {
         fld('retestN', '最近交卷的几场可以整卷再做', stepHTML('retestN'), hint('0＝不开放；按交卷时间往前数')) + secZ : '') +
       (has36() ? secA('bxShow', '<h2>题目上方的档和难度星级 <small>测验、练习、刷题三处都按这一项；保存后马上生效</small></h2>') +
         fld('starShow', '题目上方显示档和难度星级', sw('starShow', '题目上方显示档和难度星级'), hint('例如「N3 ★★★★」：星级是同一档里比，1 星最容易。关掉＝三处都不显示，刷题页也不再有「按难度」筛选（不管开不开刷题都能改）')) + secZ : '') +
-      (has37() ? secA('bxWl', '<h2>全部词表和题型表现 <small>学生「进度」页里的词表、各题型正确率；保存后马上生效</small></h2>') +
-        fld('wlOn', '开放全部词表', sw('wlOn', '开放全部词表'), hint('学生在「进度」页点「全部词表」：能筛选、搜索、遮住读音或中文自测，点一个词看这张卡（不算学习记录）。关着＝没有这个入口。正式测验开了考还没交卷时，词表自动暂停')) +
+      (has37() ? secA('bxWl', '<h2>全部词表和题型表现 <small>学生「我的」页里的全部词表、「测验」页里的各题型正确率；保存后马上生效</small></h2>') +
+        fld('wlOn', '开放全部词表', sw('wlOn', '开放全部词表'), hint('学生在「我的」页点「全部词表」：能筛选、搜索、遮住读音或中文自测，点一个词看这张卡（不算学习记录）。关着＝没有这个入口。正式测验开了考还没交卷时，词表自动暂停')) +
         fld('wlSee', '没学过的词能不能看', seg('c-wlSee', '没学过的词能不能看', WLSEE), hint('能看：学习范围里还没学的词也列出来（可以提前看）；只看学过的和本周的：没学过的词不列、也点不开')) +
-        fld('tyDays', '各题型正确率的「最近几天」', stepHTML('tyDays'), hint('学生「进度」页、学生详情里的各题型正确率，可以在「最近这几天」和「全部」之间切换')) +
+        fld('tyDays', '各题型正确率的「最近几天」', stepHTML('tyDays'), hint('学生「测验」页、学生详情里的各题型正确率，可以在「最近这几天」和「全部」之间切换')) +
         fld('tyMin', '一种题型少于几题标「题少，仅供参考」', stepHTML('tyMin')) + secZ : '') +
-      (has38() ? secA('bxLq', '<h2>听力、随身听、快刷 <small>学生页的听音选意思、「进度」页的随身听和快刷；保存后马上生效</small></h2>') +
+      (has38() ? secA('bxLq', '<h2>听力、随身听、快刷 <small>学生页的听音选意思、「我的」页的随身听和快刷；保存后马上生效</small></h2>') +
         fld('acOn', '刷题、练习里出「听音选意思」', sw('acOn', '刷题、练习里出听音选意思'), hint('播单词读音、四个中文意思选一个（没有读音的词不出）。开：刷题可以选这个题型、组后小练也会出；关：刷题不能选，练习里不出，已经打开的还没答的听音题也不再判。正式测验（周测、回顾测、季度测、年测）一律不出听音题')) +
         fld('lsOn', '开放随身听', sw('lsOn', '开放随身听'), hint('连着播本周的词、错词本或词表筛出来的词：单词 → 例句 1 → 例句 2。不算学习记录、不算打卡。学生页得知这周开了考还没交卷就暂停（进随身听、快刷时和从别的应用切回来时会再核对一次）')) +
         fld('lsRep', '随身听每个词连着播几遍', stepHTML('lsRep'), hint('单词＋例句算一遍')) +

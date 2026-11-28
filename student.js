@@ -212,12 +212,14 @@ const Stu = (() => {
   window.addEventListener('pageshow', e => { if (e.persisted && $('app').dataset.role !== 'adm') checkFresh(); });
   window.addEventListener('focus', () => { if ($('app').dataset.role !== 'adm') checkFresh(); });
 
+  // 11-28 方案甲：页签显示「今天」「我的」（内部 key 照旧 study、map）；顶上一行＝头像圆（名字第一个字）＋名字＋第几周（日期范围放在 hdate 里，手机上用样式藏起来，文字不变）＋连续天数橙色胶囊＋配色圆点（手机上胶囊放在第二行「第几周」的右边，给名字留出一行）
+  const FLAME = '<svg class="fl" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5c.5 3-1.8 4.6-3.3 6.4C7.3 10.6 6 12.4 6 15a6 6 0 0 0 12 0c0-2.4-1.1-4.2-2.2-5.5-.3 1.3-1 2.3-2 2.7.4-3.6-.5-7.2-1.8-9.7z" fill="currentColor"/></svg>';
   function header() {
     const w = D.week, L = w.kind === 'L', tot = cards().length, done = doneN(), en = errN();
-    const tabs = [['study', '学习'], ['test', '测验'], ...(drillOn() || tab === 'drill' ? [['drill', '刷题']] : []), ['err', '错词本'], ['map', '进度']];
+    const tabs = [['study', '今天'], ['test', '测验'], ...(drillOn() || tab === 'drill' ? [['drill', '刷题']] : []), ['err', '错词本'], ['map', '我的']];
     return '<header class="top"><div class="wrap">' +
-      '<div class="row"><div class="brand"><span class="brand-mark" aria-hidden="true">言</span><div class="brand-txt"><b>' + esc(D.me.name) + '</b><span>第 ' + w.no + ' 周 · ' + (L ? '学新词' : '回顾周') + ' · ' + md(w.start) + '～' + md(w.end) + (w.extended ? '（已延长）' : '') + '</span></div></div><div class="hdr-right">' + (D.stats ? '<span class="chip' + (D.stats.streak ? ' ok' : '') + '">连续 ' + D.stats.streak + ' 天</span>' : '') + themeBarHTML() + '</div></div>' +
-      '<div class="seg nav-main" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k || (k === 'map' && (tab === 'words' || tab === 'listen' || tab === 'flash'))) + '">' + navIcon(k) + '<span class="nl">' + n + '</span>' + (k === 'err' && en ? '<span class="nb"> ' + en + '</span>' : '') + '</button>').join('') + '</div>' +   // 全部词表、随身听、快刷在「进度」里面；11-27：手机上这一排固定在屏幕最下面（错词本的数是角上的小红点，文字照旧「错词本 5」）
+      '<div class="row"><div class="brand"><span class="brand-mark" aria-hidden="true">' + esc([...String(D.me.name || '')][0] || '言') + '</span><div class="brand-txt"><b>' + esc(D.me.name) + '</b><span>第 ' + w.no + ' 周 · ' + (L ? '学新词' : '回顾周') + '<span class="hdate"> · ' + md(w.start) + '～' + md(w.end) + '</span>' + (w.extended ? '（已延长）' : '') + '</span></div></div><div class="hdr-right">' + (D.stats ? '<span class="chip streak' + (D.stats.streak ? ' ok' : '') + '">' + FLAME + '连续 ' + D.stats.streak + ' 天</span>' : '') + themeBarHTML() + '</div></div>' +
+      '<div class="seg nav-main" role="group" aria-label="切换">' + tabs.map(([k, n]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k || (k === 'map' && (tab === 'words' || tab === 'listen' || tab === 'flash'))) + '">' + navIcon(k) + '<span class="nl">' + n + '</span>' + (k === 'err' && en ? '<span class="nb"> ' + en + '</span>' : '') + '</button>').join('') + '</div>' +   // 全部词表、随身听、快刷在「我的」（原「进度」）里面；11-27：手机上这一排固定在屏幕最下面（错词本的数是角上的小红点，文字照旧「错词本 5」）
       (L && tot && tab === 'study' && mode !== 'rev' && !w.waiting ? '<div class="prog"><span>本周练过 ' + done + ' / ' + tot + '</span><div class="track"><div class="fill" style="width:' + (done / tot * 100) + '%"></div></div></div>' : '') +
       '</div></header>';
   }
@@ -241,6 +243,7 @@ const Stu = (() => {
     else body = mapHTML();
     $('app').innerHTML = header() + '<main class="wrap">' + (stale ? '<div class="warnbox">' + esc(stale) + ' <button class="gbtn" data-act="reload">重新读取</button></div>' : '') + body + '</main>';
     if (tab === 'test' && T && instant) needRes();
+    if (!TY && !tyBusy && $('tybox') && tyHere()) tyLoad();   // 11-28：测验页画出了各题型正确率，可手上一次都没读过、也没在读：读一次（读失败时 TY 里留着出错的说明，不会一直重读）
     if (PR) prSeen();
     if (tab === 'words' && !PR) wlPaint();
     acAuto();
@@ -509,7 +512,7 @@ const Stu = (() => {
     return Object.assign(rgCalc(num(g.n), num(g.days), g.start || w.start, today, b, t), { wait });
   }
   // 目标后面的小字：浏览器里还有没确认的（交给服务器裁定）；记进度时发现本轮的词有变化（等下一次完整读取）
-  const rgTail = g => (g.wait ? '（另有 ' + g.wait + ' 个待确认）' : '') + (rgDiff ? '（本轮的词有变化，去「进度」页，或点「复习本轮」后更新）' : '');
+  const rgTail = g => (g.wait ? '（另有 ' + g.wait + ' 个待确认）' : '') + (rgDiff ? '（本轮的词有变化，去「我的」页，或点「复习本轮」后更新）' : '');   // 11-28：「进度」页改名「我的」
   // 一句话：今天的目标 N 个、已完成 M 个（short：复习本轮上面那一行用）
   function rgLine(g, short) {
     const all = g.before + g.today, left = Math.max(0, g.n - all), wt = rgTail(g);
@@ -556,10 +559,25 @@ const Stu = (() => {
         '<div class="bar one"><button class="btn main" data-act="flip">翻面看答案 <span class="k">空格</span></button></div>' +
         '<div class="muted center">' + left + '</div>';
     }
+    const sub = rateSub(c);
     return '<div class="card">' + cardBack(c, { chip: c.lvl ? '<span class="chip" data-lv="' + esc(c.lvl) + '">' + esc(c.lvl) + '</span>' : '' }) + '</div>' +
-      '<div class="bar"><button class="btn no" data-rate="no">不会 <span class="k">1</span></button><button class="btn mid" data-rate="mid">不太确定 <span class="k">2</span></button><button class="btn ok" data-rate="ok">会了 <span class="k">3</span></button></div>' +
-      '<div class="muted small center">' + (mode === 'round' ? '「不会」「不太确定」的词，这次复习里还会再出现；复习本轮不算成绩，回顾测才算' : '「不会」「不太确定」的词，今天还会再出现') +
-      (mode === 'rev' && c.chk ? '<br>抽查：「会了」下次间隔翻倍（达到上限后保持）；「不会」「不太确定」就回到每天复习，从第 1 次重新来' : '') + '</div>';   // 第 39 步
+      '<div class="bar"><button class="btn no rate-btn" data-rate="no"><span class="rt">不会 <span class="k">1</span></span><small class="rate-sub">' + sub[0] + '</small></button>' +
+      '<button class="btn mid rate-btn" data-rate="mid"><span class="rt">不太确定 <span class="k">2</span></span><small class="rate-sub">' + sub[1] + '</small></button>' +
+      '<button class="btn ok rate-btn" data-rate="ok"><span class="rt">会了 <span class="k">3</span></span><small class="rate-sub">' + sub[2] + '</small></button></div>' +
+      '<div class="muted small center rnote">' + (mode === 'round' ? (again.has(c.id) ? '这张评完，本次不再出现' : '「不会」「不太确定」的词，这次复习里还会再出现') + '；复习本轮不算成绩，回顾测才算' : '「不会」「不太确定」的词，今天还会再出现') +   // 复查第 1 轮：复习本轮的这一行和评分按钮的小字用同一个判断（again 里有＝已经放回来过一次）
+      (mode === 'rev' && c.chk && !revDone.has(c.id) ? '<br>抽查：「会了」下次间隔翻倍（达到上限后保持）；「不会」「不太确定」就回到每天复习，从第 1 次重新来' : '') + '</div>';   // 第 39 步（今天已经评过、放回来的这张不再记服务器，就不写这一句）
+  }
+  // 11-28 方案甲：评分按钮下面的小字，按模式只写真的会发生的事（和 rate() 里放回队列的规则、服务器的排期一致）：
+  //   本周词单（new／all）：「不会」放回去约隔 2 张再来、「不太确定」约隔 5 张，「会了」这张先过
+  //   每日复习（rev）第一次评分（记到服务器）：不会／不太确定＝明天还会再来；会了＝隔得更久再来——
+  //     复查第 1 轮：已经复习「会了」4 次（卡上的 step＝4）的，这次「会了」就复习毕业（数据库第 39 步 rev_step 到 5、不再排每日复习）：写「完成每日复习」；
+  //     抽查的词：会了＝延长间隔，直到上限（到了上限保持原来的间隔，不写天数），不会／不太确定＝回到每天复习
+  //     今天已经评过、被放回来的这张（revDone 里有）：只在这次复习里重排、不再记服务器，所以和本周词单一样写
+  //   复习本轮（round）：第一次「不会」「不太确定」这次复习里再出一次；已经放回来过一次（again 里有）的，再评就过去了（本次不再出现）
+  function rateSub(c) {
+    if (mode === 'rev' && !revDone.has(c.id)) return c.chk ? ['回到每天复习', '回到每天复习', '延长间隔，直到上限'] : ['明天还会再来', '明天还会再来', num(c.step) >= 4 ? '完成每日复习' : '隔得更久再来'];
+    if (mode === 'round') return again.has(c.id) ? ['本次不再出现', '本次不再出现', '这张先过'] : ['这次复习里再出一次', '这次复习里再出一次', '这张先过'];
+    return ['约隔 2 张再来', '约隔 5 张再来', '这张先过'];
   }
   function flip() { if (!queue.length || flipped || listView || tab !== 'study' || goalStop()) return; flipped = true; render(); play(aud(queue[0])); }   // 第 39 步：停在「今天的目标完成了」时不翻面
   // 先存好再翻到下一张：没存上就留在这张，可以再点一次
@@ -782,11 +800,13 @@ const Stu = (() => {
     return lines.map(l => '<div>' + l + '</div>').join('');
   }
   const JN = [['yomi', '漢字読み'], ['hyoki', '表記'], ['bunmyaku', '文脈規定'], ['iikae', '言い換え'], ['yoho', '用法']];
+  // 11-28 方案甲：各题型正确率（tyHTML）从「我的」（原「进度」）页挪到这里，放在测验页最下面：
+  //   等待开课时不显示（还没有成绩，进页也不读）；正在考（T）、在练习／刷题（PR，render 走 pracHTML）时不显示；本周没有测验时照样显示（看以前的）
   function testHTML() {
     const w = D.week, list = D.tests || [];
     if (w.waiting || w.today < w.start) return '<div class="box"><h2>还没开始</h2><div class="muted">第 1 周从 ' + md(w.start) + ' 开始。</div></div>';
     if (T) return quizHTML();
-    if (!list.length) return '<div class="box"><h2>这周没有测验</h2></div>';
+    if (!list.length) return '<div class="box"><h2>这周没有测验</h2></div>' + tyHTML();
     let h = list.length > 1 ? '<div class="muted">这周有 ' + list.length + ' 场测验，按顺序一场一场考。</div>' : '';
     list.forEach((x, i) => {
       if (x.done) {
@@ -806,16 +826,20 @@ const Stu = (() => {
     });
     if (list.length && list.every(x => x.done)) h += '<div class="muted">' + md(addDays(w.end, 1)) + '自动进入下一周。' + (D.errbook.length ? ' <button class="link" data-tab="err">看错词本</button>' : '') + '</div>';
     if ((D.history || []).length) {
-      h += '<div class="box"><h2>以前的成绩</h2><div class="scroll"><table class="t hist"><tr><th>周</th><th>类型</th><th>成绩</th><th>结果</th></tr>' +
-        D.history.map(x => '<tr><td>第 ' + num(x.no) + ' 周</td><td>' + esc(KN[x.kind] || x.kind) + '</td><td>' + (x.total ? num(x.score) + ' / ' + num(x.total) : '没考') + '</td><td>' +
-          (x.total ? (x.passed ? '<span class="chip ok">及格</span>' : x.manual ? '<span class="chip">放行</span>' : '<span class="chip bad">没及格</span>') : '—') +
-          (x.prac && x.id && num(x.total) > num(x.score) ? ' <button type="button" class="link" data-act="ptest" data-tid="' + esc(x.id) + '">练错题</button>' : '') +
-          (x.redo && x.id && num(x.total) ? ' <button type="button" class="link" data-act="pretest" data-tid="' + esc(x.id) + '">整卷再做</button>' : '') +
-          (x.id && num(x.total) ? ttBtn(x.id, '按题型') : '') + '</td></tr>' +
-          (x.id && TT.open.has(x.id) ? '<tr class="ttrow"><td colspan="4"><div class="ttbox" data-ttbox="' + esc(x.id) + '">' + ttHTML(x.id) + '</div></td></tr>' : '')).join('') + '</table></div>' +
+      // 11-28 方案甲：以前的成绩从表格改成一行一场（第几周 · 类型、成绩、结果；下面一排「练错题」「整卷再做」「按题型」），出现条件照旧（prac/redo/id/total）
+      h += '<div class="box histb"><h2>以前的成绩</h2><div class="hist">' +
+        D.history.map(x => {
+          const btns = (x.prac && x.id && num(x.total) > num(x.score) ? '<button type="button" class="link" data-act="ptest" data-tid="' + esc(x.id) + '">练错题</button>' : '') +
+            (x.redo && x.id && num(x.total) ? '<button type="button" class="link" data-act="pretest" data-tid="' + esc(x.id) + '">整卷再做</button>' : '') +
+            (x.id && num(x.total) ? ttBtn(x.id, '按题型') : '');
+          return '<div class="hrow"><div class="hl1"><b>第 ' + num(x.no) + ' 周 · ' + esc(KN[x.kind] || x.kind) + '</b><span class="sc">' + (x.total ? num(x.score) + ' / ' + num(x.total) : '没考') + '</span>' +
+            (x.total ? (x.passed ? '<span class="chip ok">及格</span>' : x.manual ? '<span class="chip">放行</span>' : '<span class="chip bad">没及格</span>') : '<span class="muted">—</span>') + '</div>' +
+            (btns ? '<div class="hl2">' + btns + '</div>' : '') +
+            (x.id && TT.open.has(x.id) ? '<div class="ttbox" data-ttbox="' + esc(x.id) + '">' + ttHTML(x.id) + '</div>' : '') + '</div>';
+        }).join('') + '</div>' +
         '<div class="small muted">「练错题」：拿那场错的词换一道题再练（最近交卷的 5 场可以练）。' + (D.drill && num(D.drill.retest) ? '「整卷再做」：整张卷子原题再做一遍（最近交卷的 ' + num(D.drill.retest) + ' 场可以做）。' : '') + '都不算成绩、不改错词本。' + (has37() ? '「按题型」：这场每种题型对了几题。' : '') + '</div></div>';
     }
-    return h;
+    return h + tyHTML();
   }
   async function tstart(btn) {
     if (starting) return;
@@ -859,7 +883,10 @@ const Stu = (() => {
     sayBtn(aud(it.id), '再听一遍') + slowBtn(aud(it.id), '慢速再听一遍') + '</div><div class="acm">' + esc(rs.card.m) + '</div></div>' : '';
   const stemHTML = it => it.t === 'ac' ? acStem(it) : it.s ? sentHTML(it.s) : isJ(it.t) && it.t !== 'yoho' ? sentHTML(it.q)
     : '<div class="q' + (it.t === 'cj' ? ' zhq' : '') + '" lang="' + (it.t === 'cj' ? 'zh' : 'ja') + '">' + esc(it.q) + '</div>';
-  const optHTML = (it, o) => isJ(it.t) ? rb(o) : esc(o);
+  // 11-28 方案甲：选项里的注音浮在字上方（fr：注音绝对定位在字的上面，不把字撑开，从字的左边起、不往左探出）；
+  // 用法题（整句当选项）照旧用普通注音，长句能一行行换行
+  const rbf = s => esc(s).replace(KANJI, (m, a, b, c, d) => '<span class="fr">' + (a || c) + '<i>' + (b || d) + '</i></span>').replace(/«/g, '<mark>').replace(/»/g, '</mark>');
+  const optHTML = (it, o) => isJ(it.t) ? (it.t === 'yoho' ? rb(o) : rbf(o)) : esc(o);
   const jpOpt = t => t !== 'jc' && t !== 'ac';
   // 听音题第一次显示（还没答）时自动播一次读音；同一题重画不再播（手机浏览器不让自动播时会提示点喇叭）。听音题只在练习、刷题里有（正式测验不出）
   let lastAuto = '';
@@ -878,18 +905,24 @@ const Stu = (() => {
     const s = Number.isInteger(it.st) && it.st >= 1 && it.st <= 5 ? it.st : 0;
     return '<div class="qlv"><span class="lvb" data-lv="' + esc(it.lv) + '">' + esc(it.lv) + '</span>' + (s ? '<span class="stars" role="img" aria-label="难度 ' + s + ' 星（满 5 星，同一档里比）">' + '★'.repeat(s) + '<span class="off">' + '★'.repeat(5 - s) + '</span></span>' : '') + '</div>';
   }
+  // 11-28 方案甲：题型、等级、难度星放一行（qhd：题型小标签＋原来的 badge）；判过对错（rs＝服务器给的结果）以后，
+  //   选项右边写看得见的「正确答案」「你选的」（答对时那一项写「你选对了」；没答的只标正确答案）——读屏照旧念 .sr 里的那句，看得见的这几个字不重复念
+  //   没有结果（还没答、正在判、超时没确认、已经记下但结果还没取回）时不标，不提前露出答案
   function qBody(it, sel, rs, lock) {
-    return badge(it) + '<div class="muted">' + qText(it) + '</div>' + stemHTML(it) +
+    return '<div class="qhd"><span class="chip qtype"' + (isJ(it.t) ? ' lang="ja"' : '') + '>' + esc(tName2(it.t)) + '</span>' + badge(it) + '</div>' + '<div class="muted">' + qText(it) + '</div>' + stemHTML(it) +
       '<div class="opts' + (it.t === 'yoho' ? ' long' : '') + (rs ? ' judged' : '') + '" role="group" aria-label="选项">' + it.o.map((o, j) => {
-        let cls = 'opt' + (jpOpt(it.t) ? ' jpo' : ''), no = String(j + 1), say = '';
-        if (rs) { if (j === rs.a) { cls += ' right'; no = '✓'; say = '（正确答案）'; } else if (j === rs.mine) { cls += ' wrong'; no = '✗'; say = '（你选的，错了）'; } }
+        let cls = 'opt' + (jpOpt(it.t) ? ' jpo' : ''), no = String(j + 1), say = '', tag = '';
+        if (rs) { if (j === rs.a) { cls += ' right'; no = '✓'; say = '（正确答案）'; tag = j === rs.mine ? '你选对了' : '正确答案'; } else if (j === rs.mine) { cls += ' wrong'; no = '✗'; say = '（你选的，错了）'; tag = '你选的'; } }
         else if (sel === j) cls += ' sel';
-        return '<button type="button" class="' + cls + '" data-opt="' + j + '" aria-pressed="' + (sel === j) + '"' + (lock ? ' disabled' : '') + (jpOpt(it.t) ? ' lang="ja"' : '') + '><span class="no">' + no + '</span><span class="ot">' + optHTML(it, o) + (say ? '<span class="sr">' + say + '</span>' : '') + '</span></button>';
+        return '<button type="button" class="' + cls + '" data-opt="' + j + '" aria-pressed="' + (sel === j) + '"' + (lock ? ' disabled' : '') + (jpOpt(it.t) ? ' lang="ja"' : '') + '><span class="no">' + no + '</span><span class="ot">' + optHTML(it, o) + (say ? '<span class="sr">' + say + '</span>' : '') + '</span>' +
+          (tag ? '<span class="ost" lang="zh" aria-hidden="true">' + tag + '</span>' : '') + '</button>';
       }).join('') + '</div>';
   }
   // 当场判对错的这一题下面显示什么：结果和解析 / 正在判 / 正在取回 / 没取回来
+  // 11-28 方案甲：答错时多写一句「已经记进错词本」——只在服务器的判题回执里明确说已经记进去了（inbook === true）才写；没有这个字段（旧服务器）、拿不到回执都不写。
+  //   这里只用于正式测验当场判对错（练习、刷题不进错词本，走自己的那一行）
   function verdictHTML(rs) {
-    if (rs) return '<div class="vd ' + (rs.ok ? 'ok' : 'bad') + '" role="status">' + (rs.ok ? '答对了' : '答错了，正确答案是第 ' + (rs.a + 1) + ' 个') + '</div>' + (rs.why ? '<div class="why">' + esc(rs.why) + '</div>' : '');
+    if (rs) return '<div class="vd ' + (rs.ok ? 'ok' : 'bad') + '" role="status">' + (rs.ok ? '答对了' : '答错了，正确答案是第 ' + (rs.a + 1) + ' 个') + '</div>' + (!rs.ok && rs.inbook === true ? '<div class="ibk">已经记进错词本</div>' : '') + (rs.why ? '<div class="why">' + esc(rs.why) + '</div>' : '');
     if (answering && answering.i === qi) return '<div class="vd muted" role="status">正在记答案……</div>';
     if (pend.has(qi)) return '<div class="vd warn" role="status">还没确认是否记下（网络不稳定）。刚才选的是第 ' + (pend.get(qi) + 1) + ' 个，点「再试一次」用同一个答案再记一次 <button type="button" class="gbtn" data-act="retry">再试一次</button></div>';
     if (srv.has(qi)) return fetchBad.has(qi) ? '<div class="vd muted" role="status">这题已经记下了，结果没取回来 <button type="button" class="gbtn" data-act="refetch">再取一次</button></div>' : '<div class="vd muted" role="status">正在取回这题的结果……</div>';
@@ -1027,6 +1060,7 @@ const Stu = (() => {
     T = null; submitting = false;
     resultModal(r, tid);
     await reload('成绩已经交上了，但页面刷新没成功');
+    if (tyHere()) tyLoad();   // 11-28：各题型正确率在测验页上，交了卷成绩变了，重新读一次
   }
   // 交卷后的错题解析：题目、正确答案、自己选的、为什么
   function reviewHTML(r) {
@@ -1037,7 +1071,9 @@ const Stu = (() => {
       let h = '<div class="rv"><div class="rvh"><span class="nm" lang="ja">' + esc(c.w || '') + '</span><span class="muted" lang="ja">' + esc(c.r && c.r !== c.w ? c.r : '') + '</span><span class="sub">' + esc(c.m || '') + '</span></div>';
       if (Array.isArray(x.o)) {
         h += '<div class="small muted">' + qText(x) + '</div>' + (x.s ? sentHTML(x.s, ' sm') : isJ(x.t) && x.t !== 'yoho' ? sentHTML(x.q, ' sm') : '<div class="rvq" lang="' + (x.t === 'cj' ? 'zh' : 'ja') + '">' + esc(x.q) + '</div>');
-        h += '<div class="rvo">' + x.o.map((o, j) => '<div' + (j === x.a ? ' class="ok"' : j === x.mine ? ' class="bad"' : '') + (jpOpt(x.t) ? ' lang="ja"' : '') + '><i>' + (j === x.a ? '✓' : j === x.mine ? '✗' : (j + 1)) + '</i>' + optHTML(x, o) + '</div>').join('') + '</div>';
+        // 11-28 方案甲：交卷后的回看也写「正确答案」「你选的」（没答的题只标正确答案）
+        h += '<div class="rvo">' + x.o.map((o, j) => '<div' + (j === x.a ? ' class="ok"' : j === x.mine ? ' class="bad"' : '') + (jpOpt(x.t) ? ' lang="ja"' : '') + '><i>' + (j === x.a ? '✓' : j === x.mine ? '✗' : (j + 1)) + '</i>' + optHTML(x, o) +
+          (j === x.a ? '<span class="ost" lang="zh">' + (j === x.mine ? '你选对了' : '正确答案') + '</span>' : j === x.mine ? '<span class="ost" lang="zh">你选的</span>' : '') + '</div>').join('') + '</div>';
         if (x.mine < 0) h += '<div class="small muted">这题没有作答</div>';
         if (x.why) h += '<div class="why">' + esc(x.why) + '</div>';
       }
@@ -1386,14 +1422,14 @@ const Stu = (() => {
   }
   function wordsHTML() {
     wlInit();
-    if (!has37()) return '<div class="box"><h2>全部词表</h2><div class="muted">要等数据库更新以后才能用。</div><div><button type="button" class="btn" data-tab="map">返回进度</button></div></div>';
+    if (!has37()) return '<div class="box"><h2>全部词表</h2><div class="muted">要等数据库更新以后才能用。</div><div><button type="button" class="btn" data-tab="map">返回我的</button></div></div>';
     const r = WL.res;
     // 「没有开放」：点「再看看」时按钮先灰、写正在看；没读到（断网、超时）就恢复按钮、写没读到，可以原地再点
     if (!wlOn() || (r && r.state === 'off')) return '<div class="box"><h2>全部词表</h2><div class="muted">' + esc((r && r.msg) || '老师暂时没有开放词表') + (WL.busy ? '（正在重新看一下……）' : '') + '</div>' +
       (WL.err && !WL.busy ? '<div class="warnbox">没读到（' + esc(WL.err) + '），请再点一次「再看看」</div>' : '') +
-      '<div class="form"><button type="button" class="btn" data-act="wreload"' + (WL.busy ? ' disabled' : '') + '>再看看</button><button type="button" class="btn" data-tab="map">返回进度</button></div></div>';
-    if (r && r.state === 'exam') return '<div class="box"><h2>全部词表</h2><div class="warnbox">' + esc(r.msg || '先交卷，再看词表') + '</div><div class="form"><button type="button" class="btn main" data-tab="test">去测验</button><button type="button" class="btn" data-act="wreload">交完了，再看看</button><button type="button" class="btn" data-tab="map">返回进度</button></div></div>';
-    return '<div class="box wl37"><div class="row"><h2 class="lh">全部词表</h2><button type="button" class="gbtn" data-tab="map">返回进度</button></div>' +
+      '<div class="form"><button type="button" class="btn" data-act="wreload"' + (WL.busy ? ' disabled' : '') + '>再看看</button><button type="button" class="btn" data-tab="map">返回我的</button></div></div>';
+    if (r && r.state === 'exam') return '<div class="box"><h2>全部词表</h2><div class="warnbox">' + esc(r.msg || '先交卷，再看词表') + '</div><div class="form"><button type="button" class="btn main" data-tab="test">去测验</button><button type="button" class="btn" data-act="wreload">交完了，再看看</button><button type="button" class="btn" data-tab="map">返回我的</button></div></div>';
+    return '<div class="box wl37"><div class="row"><h2 class="lh">全部词表</h2><button type="button" class="gbtn" data-tab="map">返回我的</button></div>' +
       '<div class="small muted">看卡、遮住自测都不算学习记录。' + (D.wl.see === 'learned' ? '老师设了只看学过的和本周的词。' : '学习范围里还没学的词也列出来了。') + '</div>' +
       '<input id="wq" class="wq" type="search" maxlength="30" placeholder="搜索：写法、读音、中文都行" value="' + esc(WL.q) + '" aria-label="搜索词表" autocomplete="off" spellcheck="false">' +
       '<div class="wmk" id="wlmask"><span class="lab">遮住自测</span>' + WMASK.map(([k, n]) => '<button type="button" class="ck" data-wm="' + k + '" aria-pressed="' + !!WL.mask[k] + '">' + n + '</button>').join('') + '</div>' +
@@ -1450,22 +1486,31 @@ const Stu = (() => {
   }
   const quiet = () => { const el = $('toast'); if (el) { el.hidden = true; clearTimeout(toast.h); } };
 
-  // ── 「进度」页：全部词表的入口、各题型正确率（正式测验、刷题分开；最近几天／全部）──
+  // ── 各题型正确率（正式测验、刷题分开；最近几天／全部）：11-28 方案甲起在「测验」页（原来在「进度」页）。
+  //   什么时候读（用 tySeq 只认最后发出的那次）：点进「测验」页签（等待开课时不读）；交卷以后（成绩变了）；点「再试一次」；
+  //   测验页画出这一块时手上还一次都没读过、也没在读（比如在考试中点进测验页，退出考试回来）——见 render()。
+  //   答题（T）、练习／刷题（PR）时页面上没有这一块，回复到了只记下，回到测验页再显示。tyBusy：最后发出的那次还没回来
+  const tyHere = () => has37() && tab === 'test' && !T && !PR && !!D && !!D.week && !(D.week.waiting || D.week.today < D.week.start);
+  let tyBusy = false;
   async function tyLoad() {
     if (!has37()) return;
-    const my = ++tySeq;
+    const my = ++tySeq; tyBusy = true;
     let r = null, err = null;
     try { r = await rpc('stu_info', { act: 'types', a: {} }, { obj: true, timeout: 20000 }); } catch (e) { err = e; }
     if (my !== tySeq) return;
+    tyBusy = false;
     TY = err ? { r: TY && TY.r, err: err.message } : { r, err: null };
     tyPaint();
   }
-  const tyPaint = () => { const el = $('tybox'); if (el && tab === 'map' && !PR) el.outerHTML = tyHTML(); };
+  const tyPaint = () => { const el = $('tybox'); if (el && tyHere()) el.outerHTML = tyHTML(); };   // 只换这一块（不重画整页）
   function tyHTML() {
     if (!has37()) return '';
     const R = TY && TY.r, days = num(R ? R.days : D.wl.days, 30), mn = num(R ? R.min : D.wl.min, 10);
     let h = '<div class="box" id="tybox"><div class="row"><h2 class="lh">各题型正确率</h2><div class="seg" role="group" aria-label="看哪段时间"><button type="button" data-tyall="0" aria-pressed="' + !tyAll + '">最近 ' + days + ' 天</button><button type="button" data-tyall="1" aria-pressed="' + tyAll + '">全部</button></div></div>';
     if (!R) return h + (TY && TY.err ? '<div class="warnbox">没读到：' + esc(TY.err) + ' <button type="button" class="gbtn" data-act="tyre">再试一次</button></div>' : '<div class="muted">正在读取……</div>') + '</div>';
+    // 复查第 1 轮：以前读到过、这次重新读没成功——照样显示上次的结果，但在上面写明「更新失败」，给「再试一次」（免得把交卷以前的正确率当成最新的）
+    if (TY && TY.err) h += '<div class="warnbox tystale">更新失败，当前显示上次结果（' + esc(TY.err) + '） <button type="button" class="gbtn" data-act="tyre">再试一次</button></div>';
+    else if (TY && TY.upd) h += '<div class="note tyupd">正在更新，当前显示上次结果</div>';   // 复查第 2 轮：点了「再试一次」、新结果还没回来
     const k = tyAll ? 'all' : 'recent', A = (R.test || {})[k] || {}, B = (R.drill || {})[k] || {};
     const ks = TN.map(([t]) => t).concat(Object.keys(A).concat(Object.keys(B)).filter(t => !TN.some(([x]) => x === t))).filter((t, i, a) => a.indexOf(t) === i && (A[t] || B[t]));
     const cell = x => x && num(x.n) ? '<b>' + pct(x.right, x.n) + '</b><span class="small muted"> ' + num(x.right) + '/' + num(x.n) + '</span>' + (num(x.n) < mn ? '<br><span class="chip warn tyfew">题少，仅供参考</span>' : '') : '<span class="muted">—</span>';
@@ -1473,9 +1518,10 @@ const Stu = (() => {
     else h += '<div class="scroll"><table class="t tyt"><tr><th>题型</th><th>正式测验</th><th>刷题</th></tr>' + ks.map(t => '<tr><td lang="ja">' + esc(tName2(t)) + '</td><td>' + cell(A[t]) + '</td><td>' + cell(B[t]) + '</td></tr>').join('') + '</table></div>';
     return h + '<div class="small muted">正式测验：交了卷的周测、回顾测、季度测、年测（' + (tyAll ? '一共 ' + num(R.test && R.test.tests) : '最近 ' + days + ' 天 ' + num(R.test && R.test.rtests)) + ' 场，没答的题算错，和成绩一样）；刷题：只算答了的题。一种题型少于 ' + mn + ' 题时标「题少，仅供参考」。</div></div>';
   }
+  // 「我的」页工具「全部词表」那一行展开后的内容（11-28 方案甲：标题在工具行上，这里只放说明和按钮）
   function wlEntry() {
     if (!wlOn()) return '';
-    return '<div class="box"><h2>全部词表</h2><div class="small muted">学过的、要学的词都在这里：可以筛选、搜索，遮住读音或中文自测，点一个词看卡片（不算学习记录）。</div><div><button type="button" class="btn main" data-act="words">打开词表</button></div></div>';
+    return '<div class="tbox"><div class="small muted">学过的、要学的词都在这里：可以筛选、搜索，遮住读音或中文自测，点一个词看卡片（不算学习记录）。</div><div><button type="button" class="btn main" data-act="words">打开词表</button></div></div>';
   }
 
   // ── 测验页：一场测验按题型的对错（点了才读；交了卷的成绩不会再变，读过就留着）──
@@ -1509,19 +1555,36 @@ const Stu = (() => {
     ES = err ? { words: ES && ES.words, err: err.message } : { words: (r && r.words) || {}, err: null };
     if (tab === 'err' && !PR) esPaint();
   }
-  // 读到以后只换掉筛选那一块和每张卡上「错在哪」那一行（不重画整页：正在播的读音不会停）
+  // 读到以后：先用这份新的「错在哪」重新筛一遍（和计数、摘要、打印同一份结果 esPass）。
+  //   页面上的卡正好就是筛出来的这些（词号、顺序都一样）：只换掉筛选那一块、摘要那一行和每张卡上「错在哪」那一行（不重画整页：正在播的读音不会停）；
+  //   不一样（复查第 1 轮：先选了筛选、离开再回来、另一台设备多记了错词，明细晚到）：整页重画，按钮上的数、摘要、看得到的卡、「打印筛出来的」都按这一份
+  //   复查第 2 轮：先取消已经不存在的筛选项（esPrune），再统一算
   function esPaint() {
     const f = $('esf'); if (!f) return;
+    const g0 = esGone.length; esPrune();
+    if (esGone.length > g0) { render(); return; }   // 取消了筛选项：整页按剩下的筛选重画（摘要旁边写「筛选已更新」）
+    const list = D.errbook.filter(esPass), want = list.map(c => c.id).join('\n');
+    const have = [...document.querySelectorAll('main > .card[data-eid]')].map(e => e.dataset.eid).join('\n');
+    if (want !== have) { render(); return; }
     f.outerHTML = esFilter();
+    const top = document.querySelector('main > .errtop'); if (top) top.outerHTML = errTop(list);
     document.querySelectorAll('[data-es]').forEach(el => { const c = D.errbook.find(x => x.id === el.dataset.es); if (c) el.outerHTML = esLine(c); });
   }
+  // 11-28 方案甲：每个筛选按钮后面写词数＝整本错词本里有几个词属于这一项（按不同的词号、用 esOf 算；不受另一组筛选影响；
+  //   同一个词可能在几种测验、几种题型里都错过，所以各项加起来可以比总数大）。错在哪还没读到时整块不显示（不会显示成 0），读失败照旧有「再试一次」
   function esFilter() {
     let h = '';
     if (ES && ES.words) {
-      const ts = [...new Set(D.errbook.flatMap(c => { const s = esOf(c); return s ? s.types : []; }))];
-      const srcs = ESRC.filter(([k]) => D.errbook.some(c => { const s = esOf(c); return k === 'old' ? !s || s.old > 0 : s && s.kinds.includes(k); }));
-      h += '<div class="box esf"><div class="dfl"><span class="lab">在哪错过 <small>不选＝都要</small></span><div class="checks">' + srcs.map(([k, n]) => '<button type="button" class="ck" data-esrc="' + k + '" aria-pressed="' + ESF.src.has(k) + '">' + n + '</button>').join('') + '</div></div>' +
-        (ts.length ? '<div class="dfl"><span class="lab">错在什么题型</span><div class="checks">' + TN.filter(([t]) => ts.includes(t)).map(([t, n]) => '<button type="button" class="ck" data-est="' + t + '" aria-pressed="' + ESF.t.has(t) + '" lang="ja">' + n + '</button>').join('') + '</div></div>' : '') + '</div>';
+      const uniq = [...new Map(D.errbook.map(c => [c.id, c])).values()];
+      const inT = (c, t) => { const s = esOf(c); return !!s && s.types.includes(t); };
+      const srcs = esSrcs(), tys = esTypes();
+      const cnt = n => ' <small class="ckn">' + n + '</small>';
+      // 复查第 1 轮：以前读到过、这次重新读没成功——照样用上次的「错在哪」，但写明「更新失败」，给「再试一次」；
+      // 复查第 2 轮：点了「再试一次」、新结果还没回来——照样用上次的，写明「正在更新」
+      if (ES.err) h += '<div class="warnbox esstale">错在哪更新失败，当前显示上次结果（' + esc(ES.err) + '） <button type="button" class="gbtn" data-act="esre">再试一次</button></div>';
+      else if (ES.upd) h += '<div class="note esupd">错在哪正在更新，当前显示上次结果</div>';
+      h += '<div class="box esf"><div class="dfl"><span class="lab">在哪错过 <small>不选＝都要；后面的数＝整本里有几个词属于这一项</small></span><div class="checks">' + srcs.map(([k, n]) => '<button type="button" class="ck" data-esrc="' + k + '" aria-pressed="' + ESF.src.has(k) + '">' + n + cnt(uniq.filter(c => esInSrc(c, k)).length) + '</button>').join('') + '</div></div>' +
+        (tys.length ? '<div class="dfl"><span class="lab">错在什么题型 <small>同一个词可能在几种题型里都错过</small></span><div class="checks">' + tys.map(([t, n]) => '<button type="button" class="ck" data-est="' + t + '" aria-pressed="' + ESF.t.has(t) + '"><span' + (isJ(t) ? ' lang="ja"' : '') + '>' + n + '</span>' + cnt(uniq.filter(c => inT(c, t)).length) + '</button>').join('') + '</div></div>' : '') + '</div>';
     } else if (ES && ES.err) h += '<div class="warnbox">错在哪没读到：' + esc(ES.err) + ' <button type="button" class="gbtn" data-act="esre">再试一次</button></div>';
     return '<div id="esf">' + h + '</div>';
   }
@@ -1555,12 +1618,27 @@ const Stu = (() => {
       ' · 最近一次：' + (s.last ? esc(occDay(s.last)) : '具体日期不明') + (s.types.length ? ' · 错在 ' + s.types.map(tName2).join('、') : '') + '</div></div>';
   }
   const ESRC = [['week', '周测'], ['review', '回顾测'], ['quarter', '季度测'], ['year', '年测'], ['chk', '一个月后抽查'], ['old', '早期记录']];   // 第 39 步：抽查
+  // 现在有没有在筛：选了来源或题型、而且「错在哪」读到了（筛选那一块看得见）才算——打印「筛出来的」、摘要「筛出来几个」都按这个判断（复查第 2 轮：不再拿筛出来的个数和整本比）
+  const esFiltered = () => !!(ES && ES.words) && (ESF.src.size > 0 || ESF.t.size > 0);
   function esPass(c) {
-    if (!ESF.src.size && !ESF.t.size) return true;
+    if (!esFiltered()) return true;   // 「错在哪」没读到时筛选那一块不显示：也不按看不见的筛选去筛
     const s = esOf(c); if (!s) return ESF.src.has('old') && !ESF.t.size;
     const srcOk = !ESF.src.size || s.kinds.some(k => ESF.src.has(k)) || (ESF.src.has('old') && s.old > 0);
     const tOk = !ESF.t.size || s.types.some(t => ESF.t.has(t));
     return srcOk && tOk;
+  }
+  // 现在能选的来源、题型（筛选按钮就按这两份画）：整本错词本里至少有一个词属于它
+  const esInSrc = (c, k) => { const s = esOf(c); return k === 'old' ? !s || s.old > 0 : !!s && s.kinds.includes(k); };   // 和 esPass 的来源判断一样
+  const esSrcs = () => ESRC.filter(([k]) => D.errbook.some(c => esInSrc(c, k)));
+  const esTypes = () => { const ts = new Set(D.errbook.flatMap(c => { const s = esOf(c); return s ? s.types : []; })); return TN.filter(([t]) => ts.has(t)); };
+  // 复查第 2 轮：新的「错在哪」、新的错词本到了以后，已经选着、但现在没有了的筛选项（比如慢网时临时出现的「早期记录」，明细到了以后这个词归到了周测）：
+  //   取消掉（不然按钮没了、筛选还在，学生取消不了，一直 0 张），记下取消了哪几个，摘要旁边写「筛选已更新」；然后按钮、摘要、词卡、打印都按剩下的筛选算
+  let esGone = [];
+  function esPrune() {
+    if (!(ES && ES.words)) return;
+    const sk = new Set(esSrcs().map(([k]) => k)), tk = new Set(esTypes().map(([t]) => t));
+    for (const k of [...ESF.src]) if (!sk.has(k)) { ESF.src.delete(k); esGone.push((ESRC.find(([x]) => x === k) || [, k])[1]); }
+    for (const t of [...ESF.t]) if (!tk.has(t)) { ESF.t.delete(t); esGone.push(tName2(t)); }
   }
 
   // ── 学习页顶上「本周任务」：全部用学生页读到的本周词单、学习记录、复习、测验算（和「本周全部词」、顶上「本周练过」是同样的数）──
@@ -1857,7 +1935,7 @@ const Stu = (() => {
       '<div class="bar qfbar"><button type="button" class="btn" data-act="qfprev"' + (LQ.i === 0 ? ' disabled' : '') + ' aria-label="上一个">‹<span class="qft"> 上一个</span></button><button type="button" class="btn no" data-qfm="n">不会</button><button type="button" class="btn ok" data-qfm="k">会</button><button type="button" class="btn" data-act="qfnext" aria-label="下一个"><span class="qft">下一个 </span>›</button></div>';
   }
   function lqHTML() {
-    if (!LQ || LQ.kind !== tab) return '<div class="box"><h2>' + lqName(tab) + '</h2><div class="muted">没有在用的词了。</div><div><button type="button" class="btn" data-tab="map">返回进度</button></div></div>';
+    if (!LQ || LQ.kind !== tab) return '<div class="box"><h2>' + lqName(tab) + '</h2><div class="muted">没有在用的词了。</div><div><button type="button" class="btn" data-tab="map">返回我的</button></div></div>';
     const bm = lqBlockMsg(LQ.kind);
     if (bm) {   // 开了考、老师关了：停播，不显示词
       if (LQ.kind === 'listen') { lsHalt(); lsMediaState(); } else stopAudio();
@@ -1865,20 +1943,31 @@ const Stu = (() => {
     }
     return LQ.kind === 'listen' ? lsHTML() : qfHTML();
   }
-  // 「进度」页的入口：选用哪些词（本周的词／错词本；词表里筛的从「全部词表」进去），再点随身听或快刷
-  function lqEntry() {
+  // 复查第 1、2 轮：现在真能选的词源——本周的词（这周有词单）、错词本（eb：有能用的错词）、词表筛选（老师开着全部词表）。
+  //   工具行上的摘要（toolsHTML）和展开后的说明（srcHint）都用这一个判断，不推荐用不了的入口
+  const srcAvail = eb => ({ week: cards().length > 0, err: !!eb, wl: wlOn() });
+  // 展开后那一句说明：回顾周没有本周词单时，只写现在能用的（错词本 ec、全部词表 wc）；一样都没有就写「现在没有能用的词」（不是回顾周、本周有词时不写）
+  function srcHint(eb, ec, wc) {
+    const a = srcAvail(eb); if (a.week) return '';
+    const s = [a.err ? ec : '', a.wl ? wc : ''].filter(Boolean);
+    if (D.week.kind === 'R') return '<div class="small muted srchint">回顾周没有本周词单，' + (s.length ? s.join('，或者') + '。' : '现在没有能用的词。') + '</div>';
+    return s.length ? '' : '<div class="small muted srchint">现在没有能用的词。</div>';
+  }
+  // 「我的」页的入口：选用哪些词（本周的词／错词本；词表里筛的从「全部词表」进去），再点随身听或快刷。
+  // 11-28 方案甲：「随身听」「快刷」在工具列表里各占一行，点哪一行就展开这一块（kind＝listen／flash：说明和按钮只写这一样；用哪些词两行共用 LQSRC）
+  function lqEntry(kind) {
     if (!has38() || (!lsOn() && !qfOn())) return '';
     const nw = cards().length, ne = (D.errbook || []).filter(c => !c.off).length;   // 第 40 步：停用的词不算
     if (!LQSRC || (LQSRC === 'week' && !nw) || (LQSRC === 'err' && !ne)) LQSRC = nw ? 'week' : ne ? 'err' : null;
     const ex = examOpen(), n = LQSRC === 'week' ? nw : LQSRC === 'err' ? ne : 0, dis = ex || !n ? ' disabled' : '';
-    return '<div class="box" id="lqbox"><h2>随身听 · 快刷 <small>不算学习记录、不算打卡</small></h2>' +
-      '<div class="small muted">' + (lsOn() ? '随身听：连着播单词和例句的读音，可以边走边听。' : '') + (qfOn() ? '快刷：一词一屏，点一下翻面，左右滑换词。' : '') + '</div>' +
+    return '<div class="tbox" id="lqbox">' +
+      '<div class="small muted">' + (kind === 'listen' ? '随身听：连着播单词和例句的读音，可以边走边听。' : '快刷：一词一屏，点一下翻面，左右滑换词。') + '不算学习记录、不算打卡。</div>' +
       (ex ? '<div class="warnbox">这周的测验开了考还没交卷：先交卷，再用随身听、快刷</div>' : '') +   // 页面知道开了考就停；进随身听、快刷和从别的应用切回来时会再和服务器核对一次
       '<div class="checks lqsrc" role="group" aria-label="用哪些词">' + [['week', '本周的词', nw], ['err', '错词本', ne]].map(([k, nm, c]) => '<button type="button" class="ck" data-lqsrc="' + k + '" aria-pressed="' + (LQSRC === k) + '"' + (c ? '' : ' disabled') + '>' + nm + ' <small>' + c + '</small></button>').join('') +
       (wlOn() ? '<button type="button" class="ck" data-act="words">从全部词表里筛…</button>' : '') + '</div>' +
-      (!nw && D.week.kind === 'R' ? '<div class="small muted">回顾周没有本周词单，可以用错词本，或者在全部词表里筛。</div>' : '') +
-      '<div class="lqgo">' + (lsOn() ? '<button type="button" class="btn main" data-lq="listen"' + dis + '>随身听' + (n ? '（' + n + ' 个）' : '') + '</button>' : '') +
-      (qfOn() ? '<button type="button" class="btn" data-lq="flash"' + dis + '>快刷' + (n ? '（' + n + ' 个）' : '') + '</button>' : '') + '</div></div>';
+      srcHint(ne > 0, '可以用错词本', '在全部词表里筛') +   // 复查第 2 轮：和工具行上的摘要用同一个判断，只提现在能用的
+      '<div class="lqgo">' + (kind === 'listen' && lsOn() ? '<button type="button" class="btn main" data-lq="listen"' + dis + '>随身听' + (n ? '（' + n + ' 个）' : '') + '</button>' : '') +
+      (kind === 'flash' && qfOn() ? '<button type="button" class="btn main" data-lq="flash"' + dis + '>快刷' + (n ? '（' + n + ' 个）' : '') + '</button>' : '') + '</div></div>';
   }
   // 从词表「随身听」「快刷」：按现在的筛选，从第一页起一页一页读（最多 300 个）。总数用这一次读到的第一页的（不用页面上可能还没更新的旧数）；
   // 筛选还在读的时候按钮是灰的；读的时候换了筛选、排序、重新核对（词表又读了一次）、离开了词表页，这一批就作废，不打开
@@ -1915,7 +2004,7 @@ const Stu = (() => {
     const from = LQ ? LQ.from : 'map';
     lqLeave(); tab = from === 'words' && wlOn() ? 'words' : 'map'; window.scrollTo({ top: 0 });
     if (tab === 'words') { wlInit(); wlRecheck(); return; }
-    render(); refreshSide('map'); tyLoad();
+    render(); refreshSide('map');   // 11-28：各题型正确率挪到「测验」页了，回「我的」不再读它；工具展开的那一行（toolOpen）照旧开着
   }
 
   // ── 第 40 步：打印词单（本周的词、错词本、词表筛出来的）：浏览器打印（app.js 的 printDialog），不改学习记录、不算练过、不打卡。
@@ -1948,6 +2037,9 @@ const Stu = (() => {
     const bm = prBlockMsg(); if (bm) { toast(bm); return; }
     prBusy = true; busy(btn, true);
     const ss = src === 'errf' ? 'err' : src;
+    // 复查第 2 轮：错词本页在筛（选了来源或题型）时，点「打印筛出来的」这一刻先记下页面上筛出来的是哪些词；服务器核对回来以后只印这一批里还能印的。
+    //   没在筛：照原来整本打印（按服务器这时给的错词本）
+    const vis = src === 'errf' && esFiltered() ? D.errbook.filter(esPass) : null;
     let r = null, err = null;
     try { r = await rpc('stu_info', { act: 'print', a: { src: ss } }, { obj: true, timeout: 20000 }); } catch (e) { err = e; }
     prBusy = false; busy(btn, false);
@@ -1964,25 +2056,26 @@ const Stu = (() => {
       if (src === 'week') info.title = '本周的词（第 ' + D.week.no + ' 周）';
     }
     if (src !== 'week') {
-      const eb = D.errbook || [], list = src === 'errf' ? eb.filter(esPass) : eb;
-      if (list.length < eb.length) { const keep = new Set(list.map(c => c.id)); ws = ws.filter(x => keep.has(x.id)); off = list.filter(c => !prOk(c)).length; }   // 错词本页筛出来的：只印筛出来的那些
-      info.title = '错词本' + (list.length < eb.length ? '（筛出来的 ' + ws.length + ' 个）' : '');
+      if (vis) { const keep = new Set(vis.map(c => c.id)); ws = ws.filter(x => keep.has(x.id)); off = vis.filter(c => !prOk(c)).length; }   // 错词本页筛出来的：只印点打印时看得到的那些（服务器多给的、这一批以外的都不印）
+      info.title = '错词本' + (vis ? '（筛出来的 ' + ws.length + ' 个）' : '');
     }
     info.words = ws; info.note = off ? '已停用的 ' + off + ' 个不印' : '';
     printDialog(info);
   }
-  // 「进度」页的入口：选打印哪些词（本周的词／错词本；词表里筛的从「全部词表」进去，筛好点「打印」）
+  // 「我的」页的入口：选打印哪些词（本周的词／错词本；词表里筛的从「全部词表」进去，筛好点「打印」）
+  // 11-28 方案甲：标题在工具行上（「打印词单」），点开这一行才显示这一块
+  const prAny = () => cards().length > 0 || (D.errbook || []).some(prOk) || wlOn();
   function prEntry() {
     const nw = cards().length, ne = (D.errbook || []).filter(prOk).length;
     if (!nw && !ne && !wlOn()) return '';
     if (!PRSRC || (PRSRC === 'week' && !nw) || (PRSRC === 'err' && !ne)) PRSRC = nw ? 'week' : ne ? 'err' : null;
     const ex = examOpen(), n = PRSRC === 'week' ? nw : PRSRC === 'err' ? ne : 0;
-    return '<div class="box" id="prbox"><h2>打印词单 <small>不算学习记录</small></h2>' +
-      '<div class="small muted">默写纸（印中文，写法、读音两栏空着）后面自动附答案页；也可以印成日文表。用手机、电脑的浏览器打印（A4 纸）。</div>' +
+    return '<div class="tbox" id="prbox">' +
+      '<div class="small muted">默写纸（印中文，写法、读音两栏空着）后面自动附答案页；也可以印成日文表。用手机、电脑的浏览器打印（A4 纸）。不算学习记录。</div>' +
       (ex ? '<div class="warnbox">这周的测验开了考还没交卷：先交卷，再打印</div>' : '') +
       '<div class="checks lqsrc" role="group" aria-label="打印哪些词">' + [['week', '本周的词', nw], ['err', '错词本', ne]].map(([k, nm, c]) => '<button type="button" class="ck" data-prsrc="' + k + '" aria-pressed="' + (PRSRC === k) + '"' + (c ? '' : ' disabled') + '>' + nm + ' <small>' + c + '</small></button>').join('') +
       (wlOn() ? '<button type="button" class="ck" data-act="words">从全部词表里筛…</button>' : '') + '</div>' +
-      (!nw && D.week.kind === 'R' ? '<div class="small muted">回顾周没有本周词单，可以打印错词本，或者在全部词表里筛好以后点「打印」。</div>' : '') +
+      srcHint(ne > 0, '可以打印错词本', '在全部词表里筛好以后点「打印」') +   // 复查第 2 轮：和工具行上的摘要用同一个判断，只提现在能用的
       '<div class="lqgo"><button type="button" class="btn" data-act="prgo"' + (ex || !n ? ' disabled' : '') + '>打印…' + (n ? '（' + n + ' 个）' : '') + '</button></div></div>';
   }
   // 从词表「打印」：按现在的筛选从第一页起读（最多 300 个），再取词性和例句（数据库跑过第 40 步才有这种取法；没有就只印写法、读音、中文）。
@@ -2030,14 +2123,20 @@ const Stu = (() => {
 
   // ── 错词本 ──
   let errCompact = false;
+  // 摘要那一行：一共几个、筛出来几个；紧凑／完整切换；打印（筛出来的；停用的不印）。list＝按现在的筛选筛出来的（和下面的卡、打印同一份）
+  //   复查第 2 轮：有没有在筛按「选了来源或题型」判断（esFiltered），不拿个数比；取消过已经不存在的筛选项时，后面写「筛选已更新」
+  const errTop = list => '<div class="row errtop"><span class="muted">一共 ' + D.errbook.length + ' 个' + (esFiltered() ? '，筛出来 ' + list.length + ' 个' : '') + '，最近一周错的排在前面。' +
+    (esGone.length ? '<span class="esgone">筛选已更新：「' + esc([...new Set(esGone)].join('」「')) + '」现在没有词了，已经取消。</span>' : '') + '</span>' +
+    '<span class="copyrow"><button type="button" class="gbtn" data-act="errview" aria-pressed="' + errCompact + '">' + (errCompact ? '完整卡片' : '紧凑列表') + '</button>' +
+    (list.some(prOk) ? '<button type="button" class="gbtn" data-act="prerr">打印' + (esFiltered() ? '筛出来的' : '') + '</button>' : '') + '</span></div>';   // 第 40 步：打印（停用的不印）
   function errHTML() {
     if (!D.errbook.length) return '<div class="box"><h2>错词本是空的</h2><div class="muted">测验答错的词会放到这里。</div></div>';
+    esPrune();   // 复查第 2 轮：错词本换了（另一台设备记了错词、老师停用了词）也先取消已经不存在的筛选项
     let h = has37() ? esFilter() : '';
     const list = D.errbook.filter(esPass);
-    h += '<div class="row errtop"><span class="muted">一共 ' + D.errbook.length + ' 个' + (list.length < D.errbook.length ? '，筛出来 ' + list.length + ' 个' : '') + '，最近一周错的排在前面。</span>' +
-      '<span class="copyrow"><button type="button" class="gbtn" data-act="errview" aria-pressed="' + errCompact + '">' + (errCompact ? '完整卡片' : '紧凑列表') + '</button>' +
-      (list.some(prOk) ? '<button type="button" class="gbtn" data-act="prerr">打印' + (list.length < D.errbook.length ? '筛出来的' : '') + '</button>' : '') + '</span></div>';   // 第 40 步：打印（停用的不印）
-    return h + list.map(c => '<div class="card' + (errCompact ? ' err-compact' : '') + '">' + cardBack(c, { chip: (c.lvl ? '<span class="chip" data-lv="' + esc(c.lvl) + '">' + esc(c.lvl) + '</span> ' : '') + '<span class="chip warn">错过 ' + num(c.wrong) + ' 次</span>' + (c.st === 'correct' ? ' <span class="chip ok">后来答对了</span>' : '') + (c.pok ? ' <span class="chip ok">练习答对过</span>' : '') + (c.off ? ' <span class="chip">已停用</span>' : '') }).replace('</div>', '</div>' + esLine(c)) + '</div>').join('');   // 错在哪：放在词的下面一行
+    h += errTop(list);
+    // 每张卡记下词号（data-eid）：「错在哪」晚到时用来核对看得到的卡是不是正好筛出来的这些（见 esPaint）
+    return h + list.map(c => '<div class="card' + (errCompact ? ' err-compact' : '') + '" data-eid="' + esc(c.id) + '">' + cardBack(c, { chip: (c.lvl ? '<span class="chip" data-lv="' + esc(c.lvl) + '">' + esc(c.lvl) + '</span> ' : '') + '<span class="chip warn">错过 ' + num(c.wrong) + ' 次</span>' + (c.st === 'correct' ? ' <span class="chip ok">后来答对了</span>' : '') + (c.pok ? ' <span class="chip ok">练习答对过</span>' : '') + (c.off ? ' <span class="chip">已停用</span>' : '') }).replace('</div>', '</div>' + esLine(c)) + '</div>').join('');   // 错在哪：放在词的下面一行
   }
 
   // ── 拼图地图 ──
@@ -2110,34 +2209,64 @@ const Stu = (() => {
   const ownNote = x => x.mine && lvText(x.mine) !== lvText(x.lv) ? '<div class="sub ownl">老师给你单独调过学法，上面是换过去后你实际的学法；这个方案本来是：' + esc(lvText(x.lv)) + '</div>' : '';
 
   const FUJI_STAGE = { N5: '第一阶 · 河口湖山麓', N4: '第二阶 · 浅间鸟居', N3: '第三阶 · 云海五合目', N2: '第四阶 · 星野八合目', N1: '第五阶 · 富士雪顶' };
+  // ── 「我的」（原「进度」）页 ──
+  // 11-28 方案甲：顺序＝三个大数 → 工具（一行一个，点一行在下面展开原来那块：全部词表／随身听／快刷／打印词单）→ 最近 30 天 → 成就 → 我的学法 → 同班同学 → 富士山五阶。
+  // toolOpen：展开着的那一行（一次只开一行；只记在这一页里，重画、从随身听／快刷／词表回来都照旧开着）。
+  // fujiOpen：富士山哪一档的词格展开着（学生自己点过的记在这一页里；没点过的：正在学的那一档——第一个要学、还没全亮的档——默认展开）
+  let toolOpen = null;
+  const fujiOpen = new Map();
+  const TICON = {
+    wl: '<path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.8" cy="6.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="4.8" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="4.8" cy="17.5" r="1.1" fill="currentColor" stroke="none"/>',
+    ls: '<path d="M4 15.5v-3.5a8 8 0 0 1 16 0v3.5"/><rect x="3.5" y="14" width="4.5" height="6.5" rx="1.8"/><rect x="16" y="14" width="4.5" height="6.5" rx="1.8"/>',
+    qf: '<rect x="7" y="3.5" width="12" height="16" rx="2.5"/><path d="M4.5 7v10.5a3 3 0 0 0 3 3h7"/>',
+    pr: '<path d="M7 9V3.5h10V9"/><rect x="3.5" y="9" width="17" height="8" rx="2"/><rect x="7" y="14" width="10" height="6.5" rx="1"/>',
+  };
+  function toolsHTML() {
+    // 复查第 1 轮：行上只写现在真能选的词源（回顾周没有本周词单、错词本空着、老师关了全部词表时就不写那一样）；考试锁的提示照旧
+    const lock = examOpen() ? ' · 测验开了考还没交卷，先交卷' : '';
+    const pick = eb => { const a = srcAvail(eb), s = [a.week ? '本周的词' : '', a.err ? '错词本' : '', a.wl ? '词表筛选' : ''].filter(Boolean); return s.length ? ' · 先选：' + s.join(' / ') : ' · 现在没有能用的词'; };
+    const rows = [];
+    if (wlOn()) rows.push(['wl', '全部词表', '筛选、搜索、遮住读音或中文自测' + lock]);
+    if (lsOn()) rows.push(['ls', '随身听', '连着播单词和例句' + pick((D.errbook || []).some(c => !c.off)) + lock]);
+    if (qfOn()) rows.push(['qf', '快刷', '一词一屏，左右滑' + pick((D.errbook || []).some(c => !c.off)) + lock]);
+    if (prAny()) rows.push(['pr', '打印词单', '默写纸＋答案页，也能印日文表' + pick((D.errbook || []).some(prOk)) + lock]);
+    if (!rows.length) return '';
+    if (!rows.some(([k]) => k === toolOpen)) toolOpen = null;   // 展开着的那一样关掉了（老师关了随身听等）：收起
+    return '<div class="sech"><span>工具</span><small>都不算学习记录、不算打卡</small></div><div class="grp tools">' + rows.map(([k, nm, sub]) => {
+      const on = toolOpen === k, body = on ? (k === 'wl' ? wlEntry() : k === 'pr' ? prEntry() : lqEntry(k === 'ls' ? 'listen' : 'flash')) : '';
+      return '<div class="tool' + (on ? ' open' : '') + '"><button type="button" class="trow" data-tool="' + k + '" aria-expanded="' + on + '"><span class="tic tic-' + k + '" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">' + TICON[k] + '</svg></span>' +
+        '<span class="tt"><b>' + nm + '</b><span>' + sub + '</span></span><span class="chev" aria-hidden="true"></span></button>' + body + '</div>';
+    }).join('') + '</div>';
+  }
   function mapHTML() {
     const c = D.cfg, si = LV.indexOf(c.start), s = D.stats || { streak: 0, learned: 0, correct: 0, passed: 0, days: 0, last30: [] };
     const skipped = l => c.mode === 'only' ? !(c.only || []).includes(l) : c.mode === 'step' ? LV.indexOf(l) < si : false;
-    const tools = [wlEntry(), lqEntry(), prEntry()].filter(Boolean).join('');
-    let h = (tools ? '<div class="map-tools">' + tools + '</div>' : '') + '<div class="box"><h2>我的进度</h2><div class="stats">' +   // 第 40 步：打印词单
-      '<div class="stat"><b>' + num(s.streak) + ' 天</b><span>连续打卡</span></div><div class="stat"><b>' + num(s.learned) + '</b><span>学过的词（累计）</span></div><div class="stat"><b>' + num(s.correct) + '</b><span>现在全亮的词</span></div></div>';
+    let h = '<div class="grp stats3"><div><b class="co">' + num(s.streak) + ' 天</b><span>连续打卡</span></div><div><b class="ca">' + num(s.learned) + '</b><span>学过的词（累计）</span></div><div><b class="cg">' + num(s.correct) + '</b><span>现在全亮的词</span></div></div>';
+    h += toolsHTML();   // 第 37、38、40 步：全部词表、随身听、快刷、打印词单
     const on = new Set(s.last30 || []);
-    let cal = ''; for (let i = 29; i >= 0; i--) { const k = addDays(D.week.today, -i), [, mm, dd] = k.split('-'); cal += '<i' + (on.has(k) ? ' class="f"' : '') + ' title="' + (+mm) + '月' + (+dd) + '日"></i>'; }
-    h += '<div class="lab muted">最近 30 天（学过卡、复习过或考过试就亮）</div><div class="cal">' + cal + '</div>';
-    h += '<div class="lab muted">成就</div><div class="badges">' + BADGES.map(([k, n, name]) => '<span class="badge' + ((k === 'streak' ? Math.max(num(s.streak), num(s.best)) : num(s[k])) >= n ? ' got' : '') + '">' + name + '</span>').join('') + '</div></div>';
-    h += tyHTML();   // 第 37 步：各题型正确率（进「进度」页时读）
+    let cal = ''; for (let i = 29; i >= 0; i--) { const k = addDays(D.week.today, -i), [, mm, dd] = k.split('-'); cal += '<i class="' + (on.has(k) ? 'f' : '') + (i === 0 ? ' t' : '') + '" title="' + (+mm) + '月' + (+dd) + '日"></i>'; }
+    h += '<div class="sech"><span>最近 30 天</span><small>学过卡、复习过或考过试就亮</small></div><div class="grp calg"><div class="cal">' + cal + '</div><div class="calf"><span>' + md(addDays(D.week.today, -29)) + '</span><span>今天</span></div></div>';
+    h += '<div class="sech"><span>成就</span></div><div class="grp badges">' + BADGES.map(([k, n, name]) => '<span class="badge' + ((k === 'streak' ? Math.max(num(s.streak), num(s.best)) : num(s[k])) >= n ? ' got' : '') + '">' + name + '</span>').join('') + '</div>';
     h += planHTML();
     if ((D.class || []).length) {
-      h += '<div class="box"><h2>' + esc(D.me.grp) + ' <small>同班同学，按名字排</small></h2><div class="list">' + D.class.map(m =>
+      h += '<div class="box classb"><h2>' + esc(D.me.grp) + ' <small>同班同学，按名字排</small></h2><div class="list">' + D.class.map(m =>
         '<div class="it"><span class="nm">' + esc(m.name) + (m.me ? ' <span class="chip">我</span>' : '') + '</span><span class="sub">' + (m.today ? '<span class="chip ok">今天学了</span> ' : '') + '连续 ' + num(m.streak) + ' 天 · 本周练过 ' + num(m.week) + ' 个</span></div>').join('') + '</div></div>';
     }
-    h += '<div class="muted">富士山五阶词库地图：从 N5 山麓到 N1 雪顶，学过的词先半亮，测验答对了全亮。</div>';
+    // 富士山五阶：每档一行（贴纸、第几阶、全亮／半亮／共几个、进度条），点一行看这一档的全部词格
+    const cur = LV.find(l => { const m = D.map[l]; return m && !skipped(l) && new Set(m.full).size < num(m.total); }) || LV.find(l => D.map[l]);
+    h += '<div class="sech"><span>富士山五阶词库</span><small>从 N5 山麓到 N1 雪顶，学过的词先半亮，测验答对了全亮</small></div><div class="grp fujis">';
     for (const l of LV) {
       const m = D.map[l], stg = FUJI_STAGE[l] || '';
-      if (!m) { h += '<div class="box fuji-box" data-stage="' + esc(stg) + '"><h2><span class="chip" data-lv="' + l + '">' + l + '</span> <small>还没有放进词库</small></h2></div>'; continue; }
+      if (!m) { h += '<div class="fuji-box" data-stage="' + esc(stg) + '"><div class="fl1"><span class="chip" data-lv="' + l + '">' + l + '</span><b>' + esc(stg) + '</b><small>还没有放进词库</small></div></div>'; continue; }
       const half = new Set(m.half), full = new Set(m.full), sk = skipped(l), tot = Math.max(1, num(m.total));
       const pf = sk ? 100 : (full.size * 100 / tot).toFixed(1), ph = sk ? 0 : (half.size * 100 / tot).toFixed(1);
-      let cells = ''; for (let i = 1; i <= m.total; i++) cells += '<i' + (full.has(i) ? ' class="f"' : half.has(i) ? ' class="h"' : '') + '></i>';
-      h += '<div class="box fuji-box" data-stage="' + esc(stg) + '"><h2><span class="chip" data-lv="' + l + '">' + l + '</span> <small>' + (sk ? '已掌握（不用学）' : '全亮 ' + full.size + ' · 半亮 ' + half.size + ' · 共 ' + num(m.total)) + '</small></h2>' +
+      const op = fujiOpen.has(l) ? fujiOpen.get(l) : l === cur;
+      let cells = ''; if (op) for (let i = 1; i <= m.total; i++) cells += '<i' + (full.has(i) ? ' class="f"' : half.has(i) ? ' class="h"' : '') + '></i>';
+      h += '<div class="fuji-box' + (op ? ' open' : '') + '" data-stage="' + esc(stg) + '"><button type="button" class="fl1" data-fuji="' + l + '" aria-expanded="' + op + '"><span class="chip" data-lv="' + l + '">' + l + '</span><b>' + esc(stg) + '</b><small>' + (sk ? '已掌握（不用学）' : '全亮 ' + full.size + ' · 半亮 ' + half.size + ' · 共 ' + num(m.total)) + '</small><span class="chev" aria-hidden="true"></span></button>' +
         '<div class="lv-bar" aria-hidden="true"><i class="bf" style="width:' + pf + '%"></i><i class="bh" style="width:' + ph + '%"></i></div>' +
-        '<div class="map' + (sk ? ' done' : '') + '" aria-label="' + l + ' 共 ' + num(m.total) + ' 个词，全亮 ' + full.size + ' 个">' + cells + '</div></div>';
+        (op ? '<div class="map' + (sk ? ' done' : '') + '" aria-label="' + l + ' 共 ' + num(m.total) + ' 个词，全亮 ' + full.size + ' 个">' + cells + '</div>' : '') + '</div>';
     }
-    return h;
+    return h + '</div>';
   }
 
   document.addEventListener('click', async e => {
@@ -2156,9 +2285,10 @@ const Stu = (() => {
       if (tab === 'words') wlDrop();                // 离开词表页：还没回来的读取作废（回来再读）
       if (tab === 'listen' || tab === 'flash') lqLeave();   // 第 38 步：离开随身听、快刷：停播、记下快刷刷到哪里
       tab = tb.dataset.tab; listView = false; window.scrollTo({ top: 0 });
+      if (tab === 'err') esGone = [];   // 复查第 2 轮：「筛选已更新」只说这一次进来以后取消掉的
       render();
       if (tab === 'map' || tab === 'err') refreshSide(tab);
-      if (tab === 'map') tyLoad();                  // 第 37 步：进「进度」页读一次各题型正确率
+      if (tyHere() && !tyBusy) tyLoad();            // 第 37 步：各题型正确率；11-28 起进「测验」页读一次（原来是进「进度」页；等待开课、正在考时不读；上面 render 刚发出第一次读取的不再重复读）
       if (tab === 'err') esLoad();                  // 第 37 步：进错词本读一次错在哪
       if (tab === 'drill') dLoad();                 // 每次进刷题页读一次（各范围的词数会变）
       return;
@@ -2181,8 +2311,12 @@ const Stu = (() => {
     const wrv = t.closest('[data-wrev]'); if (wrv) { if (WL) { const k = wrv.dataset.wrev; if (WL.open.has(k)) WL.open.delete(k); else WL.open.add(k); wlPaint(); } return; }
     const wpg = t.closest('[data-wpg]'); if (wpg) { if (WL && !wpg.disabled && !WL.busy) { WL.off = num(wpg.dataset.wpg); wlLoad(); const el = $('wlres'); if (el) el.scrollIntoView({ block: 'start' }); } return; }
     const wcd = t.closest('[data-wcard]'); if (wcd) { if (tab === 'words') wlCard(wcd.dataset.wcard); return; }
+    // 11-28 方案甲：「我的」页的工具行（点一下展开、再点收起；一次只开一行）、富士山每一档（点一下看词格）。只是换显示，不读东西
+    const tl = t.closest('[data-tool]'); if (tl) { if (tab === 'map') { toolOpen = toolOpen === tl.dataset.tool ? null : tl.dataset.tool; render(); const b = document.querySelector('[data-tool="' + tl.dataset.tool + '"]'); if (b) try { b.focus({ preventScroll: true }); } catch (er) {} } return; }
+    const fj = t.closest('[data-fuji]'); if (fj) { if (tab === 'map') { const l = fj.dataset.fuji; fujiOpen.set(l, fj.getAttribute('aria-expanded') !== 'true'); render(); const b = document.querySelector('[data-fuji="' + l + '"]'); if (b) try { b.focus({ preventScroll: true }); } catch (er) {} } return; }
     const tya = t.closest('[data-tyall]'); if (tya) { tyAll = tya.dataset.tyall === '1'; tyPaint(); return; }
     const esb = t.closest('[data-esrc],[data-est]'); if (esb) {
+      esGone = [];   // 学生自己又选了：「筛选已更新」那句不用再写
       const [set, v] = esb.dataset.esrc ? [ESF.src, esb.dataset.esrc] : [ESF.t, esb.dataset.est];
       if (set.has(v)) set.delete(v); else set.add(v);
       render(); return;
@@ -2268,8 +2402,9 @@ const Stu = (() => {
     }
     if (act === 'ttypes') { const tid = a.dataset.tid; if (TT.open.has(tid)) TT.open.delete(tid); else { TT.open.add(tid); if (!TT.res.has(tid) || TT.res.get(tid).err) { TT.res.delete(tid); ttLoad(tid); } } render(); return; }
     if (act === 'ttre') { const tid = a.dataset.tid; TT.res.delete(tid); ttLoad(tid); return; }
-    if (act === 'tyre') { TY = null; tyPaint(); tyLoad(); return; }
-    if (act === 'esre') { ES = null; render(); esLoad(); return; }
+    // 再试一次：以前读到过的结果先留着，写「正在更新，当前显示上次结果」（upd），新的回来再换；又失败了照旧写「更新失败」、按钮回来；以前一次都没读到过就显示「正在读取」
+    if (act === 'tyre') { TY = TY && TY.r ? { r: TY.r, err: null, upd: true } : null; tyPaint(); tyLoad(); return; }
+    if (act === 'esre') { ES = ES && ES.words ? { words: ES.words, err: null, upd: true } : null; render(); esLoad(); return; }
     if (['all', 'rev', 'back', 'list', 'more', 'tstart'].includes(act)) dropRound();   // 转去做别的：还没回来的取卡请求作废
     if (act === 'ptest') { if (T) return; pStart({ tid: a.dataset.tid }, '练本次错题', 'test'); return; }
     if (act === 'pretest') { if (T) return; pStart({ rid: a.dataset.tid }, '整卷再做一遍', 'test'); return; }
