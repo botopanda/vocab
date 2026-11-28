@@ -227,23 +227,27 @@ document.addEventListener('click', e => {
 // 一张卡的背面（学习、错词本、管理端都用）
 // 11-28 方案甲：卡内分组——词头／意思＋中日同形词（mgrp，同一组上下两格）／有同一个汉字的词（三列格子）／例句组（exg，带「例句」小标题）／小提示／拓展例句。
 // 只多了两层包裹（mgrp、exg），原来每一块的 class、顺序、条件都不变（读音和写法一样时不写读音；没有例句就没有例句组；一个例句时只有「重播」）
+// 11-28 方案甲第二批：opt.split（学生专心模式、电脑宽屏的背面）＝分左右两半：左 .cb-l（词头、意思、同汉字的词、小提示），右 .cb-r（例句、拓展例句）；
+//   不传 split 时（手机、错词本、管理端）拼法和顺序跟原来一字不差
 function cardBack(c, opt = {}) {
-  let h = '<div class="head"><span class="w" lang="ja">' + esc(c.w) + '</span>' + (c.r !== c.w ? '<span class="r" lang="ja">' + esc(c.r) + '</span>' : '') + sayBtn(aud(c.id), '听单词发音') + (opt.chip || '') + '</div>';
-  h += '<div class="mgrp"><div class="mean"><span class="pos">' + esc(c.p) + '</span>' + esc(c.m) + '</div>';
-  if (c.trap) h += '<div class="trap"><div class="lab">中日同形词 · 别按中文理解</div><div>' + rb(c.trap) + '</div></div>';
-  h += '</div>';
-  if (c.rel && c.rel.length) h += '<div class="rel"><div class="lab">有同一个汉字的词<small>有底色的是你学过的</small></div><div class="relw">' + c.rel.map(x => '<span class="rw' + (x.me ? ' me' : '') + '" title="' + esc(x.m) + '"><b lang="ja">' + esc(x.w) + '</b><span lang="ja">' + esc(x.r) + '</span><i>' + esc(x.m) + '</i></span>').join('') + '</div></div>';
+  const head = '<div class="head"><span class="w" lang="ja">' + esc(c.w) + '</span>' + (c.r !== c.w ? '<span class="r" lang="ja">' + esc(c.r) + '</span>' : '') + sayBtn(aud(c.id), '听单词发音') + (opt.chip || '') + '</div>';
+  let mg = '<div class="mgrp"><div class="mean"><span class="pos">' + esc(c.p) + '</span>' + esc(c.m) + '</div>';
+  if (c.trap) mg += '<div class="trap"><div class="lab">中日同形词 · 别按中文理解</div><div>' + rb(c.trap) + '</div></div>';
+  mg += '</div>';
+  const rel = c.rel && c.rel.length ? '<div class="rel"><div class="lab">有同一个汉字的词<small>有底色的是你学过的</small></div><div class="relw">' + c.rel.map(x => '<span class="rw' + (x.me ? ' me' : '') + '" title="' + esc(x.m) + '"><b lang="ja">' + esc(x.w) + '</b><span lang="ja">' + esc(x.r) + '</span><i>' + esc(x.m) + '</i></span>').join('') + '</div></div>' : '';
   // 每个例句旁边：喇叭（点一次播一次＝重播）、「慢」（0.75 倍）；例句下面：连播两句、慢速连播、重播（这张卡上次播的，照原来的速度）
-  if ((c.ex || []).length) h += '<div class="exg"><div class="lab exh">例句</div>';
-  (c.ex || []).forEach((e, j) => { h += '<div class="ex"><div class="jp" lang="ja">' + rb(e[0]) + '</div><div class="exb">' + sayBtn(aud(c.id, j + 1), '听例句 ' + (j + 1)) + slowBtn(aud(c.id, j + 1), '慢速听例句 ' + (j + 1)) + '</div><div class="zh">' + esc(e[1]) + '</div></div>'; });
+  let exg = '';
+  if ((c.ex || []).length) exg += '<div class="exg"><div class="lab exh">例句</div>';
+  (c.ex || []).forEach((e, j) => { exg += '<div class="ex"><div class="jp" lang="ja">' + rb(e[0]) + '</div><div class="exb">' + sayBtn(aud(c.id, j + 1), '听例句 ' + (j + 1)) + slowBtn(aud(c.id, j + 1), '慢速听例句 ' + (j + 1)) + '</div><div class="zh">' + esc(e[1]) + '</div></div>'; });
   if ((c.ex || []).length) {
     const ss = c.ex.map((e, j) => aud(c.id, j + 1)).join(' '), nn = c.ex.length === 2 ? '两' : c.ex.length;
-    h += '<div class="exa">' + (c.ex.length > 1 ? '<button type="button" class="gbtn" data-seq="' + esc(ss) + '">连播' + nn + '句</button><button type="button" class="gbtn" data-seq="' + esc(ss) + '" data-spd="' + SLOW + '">慢速连播</button>' : '') +
+    exg += '<div class="exa">' + (c.ex.length > 1 ? '<button type="button" class="gbtn" data-seq="' + esc(ss) + '">连播' + nn + '句</button><button type="button" class="gbtn" data-seq="' + esc(ss) + '" data-spd="' + SLOW + '">慢速连播</button>' : '') +
       '<button type="button" class="gbtn" data-replay="' + esc(c.id) + '" aria-label="重播这张卡上次播的读音">重播</button></div></div>';
   }
-  if (c.tip) h += '<div class="tip"><div class="lab">小提示</div><div>' + rb(c.tip) + '</div></div>';
-  if (!opt.noEx) h += exBlock(c.id);   // 拓展例句（点了才生成）
-  return h;
+  const tip = c.tip ? '<div class="tip"><div class="lab">小提示</div><div>' + rb(c.tip) + '</div></div>' : '';
+  const xb = opt.noEx ? '' : exBlock(c.id);   // 拓展例句（点了才生成）
+  if (opt.split) return '<div class="cb-l">' + head + mg + rel + tip + '</div><div class="cb-r">' + exg + xb + '</div>';
+  return head + mg + rel + exg + tip + xb;
 }
 
 // ── 拓展例句（卡片背面：知识例句、时事例句）──

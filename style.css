@@ -1873,3 +1873,184 @@ details.task > summary::after { background: var(--ai-soft); color: var(--ai-d); 
   #app.has-shell > header.top .nav-main .nb { margin-left: auto; min-width: 20px; height: 20px; border-radius: 10px; background: var(--red); color: #fff; font-size: 12px; font-weight: 700; display: inline-grid; place-items: center; padding: 0 6px; line-height: 1; }
   #app.has-shell > header.top .prog { background: var(--surface); }
 }
+
+/* ══ 11-28 界面改版「方案甲」第二批：今天页＋专心模式 ══
+   今天页（学习页签没在看卡片时）：「今天」大标题、大圈＋三个数、今天的步骤（做完变绿勾）、这一周 7 个点；电脑上右边一栏摊开任务明细和本周全部词。
+   专心模式（看卡片、正式测验、练习／刷题答题）：顶上一行和底栏收起，最上面一条 ×、细进度条、文字；电脑上左栏也收起，卡片背面分左右两半 */
+
+/* ── 通用小件 ── */
+.btn.tint { background: var(--ai-soft); color: var(--ai-d); }
+.btn.blockbtn { width: 100%; min-height: 50px; font-size: 16px; }   /* 不用 .big（单词大字已经用了这个名字） */
+
+/* ── 今天页 ── */
+.today { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.today-l, .today-r { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.tdh { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; padding: 2px 4px 0; }
+.tdh h1 { margin: 0; font-size: 34px; line-height: 1.15; font-weight: 800; letter-spacing: 0.02em; }
+.tdh span { color: var(--muted); font-size: 15px; font-weight: 600; }
+.exam-pin { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; background: var(--warn-bg); color: var(--ink); font-size: 14px; }
+.exam-pin .btn { padding: 8px 16px; }
+.hero { padding: 16px; gap: 12px; }
+.hero-top { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.hero-top.msg { flex-direction: column; align-items: stretch; gap: 8px; }
+.hero-msg { font-size: 14.5px; line-height: 1.65; color: var(--ink); }
+.ring { position: relative; width: 132px; height: 132px; flex: none; }
+.ring svg { display: block; width: 100%; height: 100%; }
+.ring circle { fill: none; stroke-width: 13; }
+.ring .rt { stroke: var(--ai-soft); }
+.ring .rf { stroke: var(--ai); stroke-linecap: round; }
+.ring .mid { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.15; text-align: center; }
+.ring .mid small { font-size: 12px; font-weight: 600; color: var(--muted); }
+.ring .mid b { font-family: var(--nm); font-size: 38px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ring .mid span { font-size: 12px; color: var(--muted); }
+.trio { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+.tn { display: flex; align-items: baseline; gap: 10px; width: 100%; min-height: 44px; padding: 6px 0; border: 0; background: none; color: var(--ink); font: inherit; text-align: left; }
+.tn + .tn { border-top: 0.5px solid var(--line); }
+button.tn { cursor: pointer; border-radius: 0; -webkit-tap-highlight-color: transparent; }
+button.tn:focus-visible { outline: 2px solid var(--ai); outline-offset: 2px; }
+.tn b { font-family: var(--nm); font-size: 30px; font-weight: 800; line-height: 1.1; min-width: 1.5em; font-variant-numeric: tabular-nums; }
+.tn .tl { font-size: 15.5px; font-weight: 700; white-space: nowrap; }
+.tn em { margin-left: auto; padding-left: 6px; font-style: normal; font-size: 12px; color: var(--ink3); white-space: nowrap; }
+.tn.c-g b { color: var(--green); }
+.tn.c-a b { color: var(--ai); }
+.tn.c-r b { color: var(--red); }
+.hero-foot { border-top: 0.5px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: var(--muted); line-height: 1.6; }
+.hero-foot b { color: var(--ink); }
+.hero-foot .rgl { color: var(--ink); }
+.hf-b { display: flex; flex-wrap: wrap; gap: 8px; }
+.hf-b .btn { padding: 9px 16px; font-size: 14.5px; }
+.sec-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 2px 4px -6px; font-size: 14px; font-weight: 600; color: var(--muted); }
+.sec-h span { font-size: 12px; font-weight: 500; color: var(--ink3); }
+ol.steps { list-style: none; margin: 0; padding: 2px 0; gap: 0; }
+.steps .stp { position: relative; display: grid; grid-template-columns: 30px minmax(0, 1fr); column-gap: 12px; align-items: center; padding: 12px 16px; }
+.steps .stp.r1 { grid-template-columns: 30px minmax(0, 1fr) auto; }
+.steps .stp + .stp::before { content: ""; position: absolute; top: 0; left: 58px; right: 0; border-top: 0.5px solid var(--line); }
+.steps .node { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--fill); color: var(--muted); font-family: var(--nm); font-weight: 700; font-size: 14px; align-self: start; margin-top: 1px; }
+.steps .node svg { width: 16px; height: 16px; }
+.steps .now .node { background: var(--ai); color: var(--on-ai); }
+.steps .done .node { background: var(--green); color: #fff; }
+.steps .sx { min-width: 0; }
+.steps .st { font-size: 15.5px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
+.steps .done .st { color: var(--muted); }
+.steps .ss { font-size: 12.5px; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
+.steps .sb { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; min-width: 0; }
+.steps .r1 .sb { grid-column: 3; grid-row: 1; margin-top: 0; }
+.steps .r1 .sb .btn { white-space: nowrap; }
+.steps .sb .btn { padding: 8px 16px; min-height: 40px; font-size: 14.5px; max-width: 100%; }
+.wkd .wkh { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 10px; flex-wrap: wrap; }
+.wkd .wkh h2 { margin: 0; font-size: 16px; font-weight: 700; }
+.wkd .wkh span { font-size: 12px; color: var(--muted); }
+.wk7 { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-top: 4px; }
+.wd { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); min-width: 0; }
+.wd i { width: 34px; height: 34px; border-radius: 50%; background: var(--fill); display: grid; place-items: center; color: #fff; }
+.wd i svg { width: 16px; height: 16px; }
+.wd.on i { background: var(--ai); color: var(--on-ai); }
+.wd.is-today i { box-shadow: inset 0 0 0 2px var(--ai); background: transparent; }
+.wd.on.is-today i { background: var(--ai); box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--ai); }
+.wd.is-today > span { color: var(--ai); font-weight: 700; }
+.wd.fut i { opacity: 0.6; }
+.tsum { font-size: 13px; color: var(--muted); padding-bottom: 4px; }
+/* 手机矮屏（微信 664 等）：「今天」大标题藏起来，三步的按钮一屏看得到 */
+@media (max-width: 959px) and (max-height: 699px) {
+  .today .tdh { display: none; }
+  .today, .today-l { gap: 12px; }
+  .hero { padding: 12px 14px; gap: 10px; }
+  .ring { width: 108px; height: 108px; }
+  .ring .mid b { font-size: 30px; }
+  .tn { min-height: 38px; padding: 3px 0; }
+  .tn b { font-size: 26px; }
+  .hero-foot { padding-top: 10px; gap: 6px; }
+  .hf-b .btn { padding: 7px 14px; }
+  .steps .stp { padding-block: 9px; }
+}
+@media (max-width: 359px) {
+  .ring { width: 104px; height: 104px; }
+  .ring .mid b { font-size: 30px; }
+  .hero-top { gap: 10px; }
+  .tn .tl { font-size: 14px; }
+  .tn em { display: none; }
+}
+
+/* ── 本周全部词（A4）：上面「‹ 今天」「打印」，三个数，格子 ── */
+.wklist { display: flex; flex-direction: column; gap: 10px; min-width: 0; }   /* 类名不用 .wlist（老师端词库已经有这个名字） */
+.subnav { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.subnav .link.back { margin: 0; padding: 10px 6px; min-height: 44px; font-size: 16px; font-weight: 600; text-decoration: none; color: var(--ai); }
+.wklist h1.lh { font-size: 28px; font-weight: 800; line-height: 1.2; margin: 0; }
+.wklist h1.lh small { font-size: 15px; font-weight: 600; }
+.wlcnt { display: flex; flex-wrap: wrap; gap: 6px; }
+.wlcnt .chip { font-size: 13px; padding: 4px 11px; background: var(--fill); color: var(--muted); }
+.wlcnt .chip.ok { background: var(--ok-bg); color: var(--ok); }
+.wlcnt .chip.bad { background: var(--bad-bg); color: var(--bad); }
+.wlrh { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.wlrh h2 { margin: 0; font-size: 15px; font-weight: 700; flex: 1 1 auto; }
+.wlrh h2 small { font-weight: 500; color: var(--muted); font-size: 12.5px; }
+.wlrh .muted { font-size: 12px; }
+
+/* ── 任务明细弹层（手机从下面弹出；上面始终有 ×） ── */
+.modal.sheet .card { position: relative; overflow: hidden; }   /* 弹层本身不滚：标题和 × 固定在上面，只有明细正文自己滚（横屏矮屏时 × 也不会滚出屏幕） */
+.modal.sheet .card > h2 { padding-right: 48px; font-size: 18px; }
+.modal.sheet .xbtn { position: absolute; top: 12px; right: 12px; width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--fill); color: var(--ink); font-size: 22px; line-height: 1; cursor: pointer; display: grid; place-items: center; padding: 0; }
+.modal.sheet .xbtn::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; }
+.modal.sheet .card > .tsbody { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1 1 auto; flex-shrink: 1; overflow-y: auto; overscroll-behavior: contain; }
+@media (max-width: 699px) {
+  .modal.sheet { padding: 0; align-items: flex-end; }
+  .modal.sheet .card { max-width: none; border-radius: 24px 24px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); max-height: calc(100dvh - 40px); }
+}
+
+/* ── 专心模式：顶上一行、底栏、页脚收起；main 最上面吸着 ×、细进度条、文字 ── */
+html.focus-on #app > header.top, html.focus-on footer.credit { display: none; }
+/* 只管学生专心页最上面那一条（老师端「最近一次交卷没及格」提醒也叫 .fbar，不能被带成吸顶） */
+html.focus-on #app[data-role="stu"] > main > .fbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 12; display: flex; align-items: center; gap: 12px; padding: 8px 0; background: var(--bg); min-width: 0; }
+html.focus-on #app[data-role="stu"] > main > .fbar .fx { position: relative; flex: none; width: 40px; height: 40px; border-radius: 50%; border: 0; padding: 0; background: var(--fill); color: var(--ink); font-size: 24px; line-height: 1; display: grid; place-items: center; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+html.focus-on #app[data-role="stu"] > main > .fbar .fx::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; }   /* 圆 40＋四周各 4＝可点 48×48 */
+html.focus-on #app[data-role="stu"] > main > .fbar .fx:focus-visible { outline: 2px solid var(--ai); outline-offset: 2px; }
+html.focus-on #app[data-role="stu"] > main > .fbar .fprog { flex: 1 1 auto; min-width: 40px; height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; }
+html.focus-on #app[data-role="stu"] > main > .fbar .fprog i { display: block; height: 100%; border-radius: 3px; background: var(--ai); transition: width 0.25s ease; }
+html.focus-on #app[data-role="stu"] > main > .fbar .fcount { flex: none; font-size: 15px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+html.focus-on #app[data-role="stu"] > main > .fbar .fcount small { font-size: 13px; font-weight: 600; color: var(--muted); }
+html.focus-on #app[data-role="stu"] > main > .fbar .fcount b { font-weight: 700; }
+html.focus-on #app[data-role="stu"] > main > .fbar .fkeys { display: none; }
+html.focus-on #app[data-role="stu"] > main > .fbar .fkeys kbd { font: inherit; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; background: var(--surface); }
+/* 卡片正面：「还剩几个」放在卡片底部；词和提示在中间；翻面条下面一行小字 */
+html.focus-on .front .hint { margin-top: 2px; }
+.front .fleft { margin-top: auto; align-self: stretch; text-align: left; font-size: 13.5px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; }
+.bar .fh { text-align: center; font-size: 12px; color: var(--ink3); line-height: 1.3; }
+.qtip { margin-top: -4px; }
+@media (max-width: 959px) {
+  html.stu-app.focus-on { scroll-padding-top: calc(64px + env(safe-area-inset-top, 0px)); scroll-padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
+  html.stu-app.focus-on body { padding-bottom: 0; }
+  html.focus-on #app[data-role="stu"] > main { padding-top: 0; }
+  html.focus-on #app[data-role="stu"] .bar { bottom: 0; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+  /* 翻面条、评分条、上一题／下一题：内容短的时候也贴在屏幕最下面（专心模式没有底栏）；正文底下留出位置，最后一行能滚到按钮条上面 */
+  html.focus-on #app[data-role="stu"] > main > .bar { position: fixed; left: 0; right: 0; bottom: 0; margin: 0 auto; max-width: 720px; z-index: 12;
+    padding-left: max(14px, env(safe-area-inset-left, 0px)); padding-right: max(14px, env(safe-area-inset-right, 0px)); }
+  html.focus-on #app[data-role="stu"] > main { padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px)); }
+  html.focus-on #app[data-role="stu"] .dbar { bottom: 0; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+  html.stu-app.focus-on .toast { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+  html.focus-on #app[data-role="stu"] #front { min-height: max(150px, calc(100vh - 230px)); }   /* 还没量时的近似值，fitFront 按屏幕算 */
+}
+
+/* ── 电脑（≥ 960）：今天页两栏；专心模式左栏收起、main 横跨整行并居中，背面左右两半 ── */
+@media (min-width: 960px) {
+  .today { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px 20px; align-items: start; }
+  .today > :not(.today-l):not(.today-r) { grid-column: 1 / -1; }
+  .today-r .wl { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .today-r .wc { padding: 9px 10px; }
+  .today-r .wc b { font-size: 16px; }
+  .ring { width: 124px; height: 124px; }
+  html.focus-on #app.has-shell { grid-template-columns: minmax(0, 1fr); }
+  html.focus-on #app.has-shell > main.wrap { grid-column: 1 / -1; width: 100%; max-width: 1100px; margin: 0 auto; }
+  html.focus-on #app[data-role="stu"] > main > .fbar { gap: 16px; padding: 4px 0 6px; }
+  html.focus-on #app[data-role="stu"] > main > .fbar .fcount { order: 1; }
+  html.focus-on #app[data-role="stu"] > main > .fbar .fprog { order: 2; }
+  html.focus-on #app[data-role="stu"] > main > .fbar .fkeys { order: 3; }
+  html.focus-on #front { min-height: min(520px, calc(100vh - 240px)); }
+  .card.cb2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+  .card.cb2 > .cb-l, .card.cb2 > .cb-r { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+}
+@media (min-width: 960px) and (hover: hover) {
+  html.focus-on #app[data-role="stu"] > main > .fbar .fkeys { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+}
+@media (min-width: 1180px) {
+  .today-r .wl { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
